@@ -7,6 +7,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ARMORS, ARMOR_IDS, WEAPONS, WEAPON_IDS, buildBody, buildLightHelm, buildWeapon, buildShield, buildHorse, buildArrow, armorMaterial, TEAM_CLOTH, TEAM_CLOTH2, CLOTH_TIME, envDressing } from './models.js';
+import { SFX } from './sfx.js';
 import { Rig, computePose, poseHorse, newOut, newPose, WEAPON_SWING, SWINGS, advanceWalk, advanceHorse, SIDED, SINGLE } from './rig.js';
 
 const $ = id => document.getElementById(id);
@@ -304,27 +305,6 @@ function log(t, c = '#eee') { logs.push({ t, c }); if (logs.length > 7) logs.shi
 function teamLog(t, text, c) { if (t === ME || t === -1) log(text, c); if (NET.mode === 'host' && (t === -1 || human.has(t))) pushEv(['log', text, c, t]); }
 
 // ===== 効果音（WebAudio で合成） =====
-const SFX = {
-  ctx: null, master: null, amb: null, last: {},
-  init() { if (this.ctx) return; try { const C = window.AudioContext || window.webkitAudioContext; this.ctx = new C(); this.master = this.ctx.createGain(); this.master.gain.value = 0.5; this.master.connect(this.ctx.destination);
-    const n = this.noiseBuf(2); const src = this.ctx.createBufferSource(); src.buffer = n; src.loop = true; const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500; this.amb = this.ctx.createGain(); this.amb.gain.value = 0; src.connect(lp).connect(this.amb).connect(this.master); src.start(); } catch (e) { this.ctx = null; } },
-  noiseBuf(sec) { const b = this.ctx.createBuffer(1, this.ctx.sampleRate * sec, this.ctx.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; },
-  vol(x, z) { if (!camera) return 1; const d = Math.hypot(x - camera.position.x, z - camera.position.z); return clamp(1 - d / 70, 0, 1) ** 2; },
-  can(k, gap) { const t = performance.now(); if ((this.last[k] || 0) + gap > t) return false; this.last[k] = t; return true; },
-  clash(x, z, big) { if (!this.ctx) return; const v = this.vol(x, z); if (v < 0.02 || !this.can('clash', 40)) return; const c = this.ctx, t = c.currentTime;
-    const src = c.createBufferSource(); src.buffer = this.nb || (this.nb = this.noiseBuf(0.3)); const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2600 + Math.random() * 1500; bp.Q.value = 3;
-    const g = c.createGain(); g.gain.setValueAtTime(0.5 * v, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.12); src.connect(bp).connect(g).connect(this.master); src.start(t); src.stop(t + 0.15);
-    const o = c.createOscillator(); o.type = 'triangle'; o.frequency.value = (big ? 900 : 1500) + Math.random() * 900; const g2 = c.createGain(); g2.gain.setValueAtTime(0.18 * v, t); g2.gain.exponentialRampToValueAtTime(0.001, t + (big ? 0.5 : 0.28)); o.connect(g2).connect(this.master); o.start(t); o.stop(t + 0.55); },
-  whoosh(heavy) { if (!this.ctx) return; const c = this.ctx, t = c.currentTime; const src = c.createBufferSource(); src.buffer = this.nb || (this.nb = this.noiseBuf(0.3)); const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.2;
-    bp.frequency.setValueAtTime(heavy ? 250 : 400, t); bp.frequency.exponentialRampToValueAtTime(heavy ? 900 : 1600, t + 0.2); const g = c.createGain(); g.gain.setValueAtTime(0.0, t); g.gain.linearRampToValueAtTime(0.35, t + 0.08); g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
-    src.connect(bp).connect(g).connect(this.master); src.start(t); src.stop(t + 0.3); },
-  thud(x, z, v0 = 1) { if (!this.ctx) return; const v = this.vol(x, z) * v0; if (v < 0.03 || !this.can('thud', 30)) return; const c = this.ctx, t = c.currentTime; const o = c.createOscillator(); o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
-    const g = c.createGain(); g.gain.setValueAtTime(0.5 * v, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.15); o.connect(g).connect(this.master); o.start(t); o.stop(t + 0.16); },
-  horn() { if (!this.ctx) return; const c = this.ctx, t = c.currentTime; for (const [f, d0, d1] of [[196, 0, 0.9], [262, 0.9, 1.9]]) { const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; const g = c.createGain();
-    g.gain.setValueAtTime(0, t + d0); g.gain.linearRampToValueAtTime(0.18, t + d0 + 0.1); g.gain.setValueAtTime(0.18, t + d1 - 0.15); g.gain.linearRampToValueAtTime(0, t + d1); o.connect(lp).connect(g).connect(this.master); o.start(t + d0); o.stop(t + d1 + 0.05); } },
-  ambient(level) { if (this.amb) this.amb.gain.setTargetAtTime(clamp(level, 0, 0.35), this.ctx.currentTime, 0.5); },
-};
-
 // ===== 戦闘 =====
 function dealDamage(a, b, base, ranged, pierce) {
   if (!b.alive) return; let d = base;
@@ -357,8 +337,8 @@ function dealDamage(a, b, base, ranged, pierce) {
   if (!parried && d > 2) { b.hitAge = 0; b.hitSide = (fx * dz - fz * dx) > 0 ? 1 : -1; }
   if (b.type === 'hero') { b.lastHurt = gameT; if (b === player) { hurtFx(d); CAM.shake = Math.min(0.6, CAM.shake + d / 60); } }
   if (a === player && !ranged) { CAM.hitstop = Math.max(CAM.hitstop, d > 30 ? 0.085 : 0.05); CAM.kick = Math.min(1, CAM.kick + 0.5); }
-  if (Math.hypot(b.x - camera.position.x, b.z - camera.position.z) < 60) { FX.spark(b.x - dx / Ln * 0.3, b.y + (b.mounted ? 2.1 : 1.25), b.z - dz / Ln * 0.3, ranged ? 3 : parried ? 12 : 7); if (!ranged) SFX.clash(b.x, b.z, d > 25 || parried); else SFX.thud(b.x, b.z, 0.5); }
-  if (b.hp <= 0) { b.hp = 0; b.alive = false; b.target = null; b.deadT = 0; if (b.h) { b.h.alive = false; b.h.deadT = 0; b.mounted = false; } if (a.type === 'hero') a.kills++;
+  if (Math.hypot(b.x - camera.position.x, b.z - camera.position.z) < 60) { FX.spark(b.x - dx / Ln * 0.3, b.y + (b.mounted ? 2.1 : 1.25), b.z - dz / Ln * 0.3, ranged ? 3 : parried ? 12 : 7); SFX.hit(b.x, b.y, b.z, ranged ? (b.T.armor || (b.def || 1) < 0.8 ? 'ting' : 'arrow') : parried ? 'wood' : (b.T.armor || (b.def || 1) < 0.8 || b.type === 'hero') ? (Math.random() < 0.35 ? 'clang' : 'clank') : 'flesh', d > 25); if (false) SFX.thud(b.x, b.z, 0.5); }
+  if (b.hp <= 0) { if (Math.random() < 0.4) SFX.grunt(b.x, b.y, b.z, b.type === 'archer'); b.hp = 0; b.alive = false; b.target = null; b.deadT = 0; if (b.h) { b.h.alive = false; b.h.deadT = 0; b.mounted = false; } if (a.type === 'hero') a.kills++;
     if (b.type === 'hero') { b.killer = a.team ?? -1; if (b.mounted) { b.mounted = false; } } }
 }
 function hurtFx(d) { $('dmg').style.boxShadow = `inset 0 0 160px rgba(160,0,0,${clamp(d / 25, 0.25, 0.85)})`; }
@@ -366,7 +346,7 @@ function fireArrow(e, t) {
   const sy = e.y + 1.5, tx = t.x + (Math.random() - 0.5) * 3.5, tz = t.z + (Math.random() - 0.5) * 3.5, ty = H(tx, tz) + 1;
   const dx = tx - e.x, dz = tz - e.z, dist = Math.hypot(dx, dz), tt = Math.max(0.3, dist / 32);
   const a = { x: e.x, y: sy, z: e.z, vx: dx / tt, vz: dz / tt, vy: (ty - sy) / tt + 0.5 * 9.8 * tt, team: e.team, dmg: e.T.arrowDmg * (forestAt(t.x, t.z) ? 0.5 : 1), stuck: 0 };
-  arrows.push(a); if (NET.mode === 'host') NET.newArrows.push(a);
+  arrows.push(a); if (NET.mode === 'host') NET.newArrows.push(a); SFX.bow(e.x, e.z);
 }
 function updateArrows(dt, visualOnly) {
   for (let i = arrows.length - 1; i >= 0; i--) { const a = arrows[i];
@@ -377,7 +357,8 @@ function updateArrows(dt, visualOnly) {
       forNear(a.x, a.z, 1, o => { if (hit || ally(o.team, a.team)) return; if (Math.abs(o.x - a.x) < 0.6 && Math.abs(o.z - a.z) < 0.6 && a.y > o.y && a.y < o.y + (o.mounted ? 2.9 : 2.0)) hit = o; });
       if (hit) { dealDamage({ x: a.x - a.vx, z: a.z - a.vz, y: a.y, T: {}, team: a.team }, hit, a.dmg, true); arrows.splice(i, 1); continue; }
     }
-    if (a.y < H(a.x, a.z)) { a.stuck = 8; if (arrows.length > 700) arrows.splice(i, 1); }
+    if (!a.wz && camera && Math.abs(a.x - camera.position.x) < 7 && Math.abs(a.z - camera.position.z) < 7 && Math.abs(a.y - camera.position.y) < 5) { a.wz = 1; SFX.whiz(a.x, a.y, a.z); }
+    if (a.y < H(a.x, a.z)) { a.stuck = 8; SFX.thunk(a.x, a.y, a.z); if (arrows.length > 700) arrows.splice(i, 1); }
   }
 }
 function moveEnt(e, gx, gz, maxS, dt, faceMove) {
@@ -439,7 +420,7 @@ function applyOrder(s, o) {
   s.tface = typeof o.face === 'number' ? o.face : null;
   if (o.mode === 'hold') { s.tx = s.ax; s.tz = s.az; s.mode = 'hold'; }
   else if (o.mode === 'follow') s.mode = 'follow';
-  else { s.tx = o.x; s.tz = o.z; s.mode = o.mode; }
+  else { s.tx = o.x; s.tz = o.z; s.mode = o.mode; if (o.mode === 'charge' && s.alive.length) SFX.warcry(s.cx, s.cz, s.alive.length); }
 }
 function updateMsgs(dt) {
   for (let i = msgs.length - 1; i >= 0; i--) { const m = msgs[i], s = m.squad;
@@ -566,7 +547,7 @@ function playerAttack() {
 // ゲスト：自分の画面で当たった相手をホストに伝える（遅れによる空振りを防ぐ）
 function guestHit(p) {
   const hits = heroTargets(p); if (hits.length) { pushEv(['h', ...hits.map(([d, o]) => o.id)]); const el = $('hitm'); el.style.opacity = 1; setTimeout(() => el.style.opacity = 0, 120);
-    CAM.hitstop = 0.05; CAM.kick = Math.min(1, CAM.kick + 0.5); for (const [d, o] of hits) { FX.spark(o.x, o.y + 1.25, o.z, 7); SFX.clash(o.x, o.z, false); o.hitAge = 0; } }
+    CAM.hitstop = 0.05; CAM.kick = Math.min(1, CAM.kick + 0.5); for (const [d, o] of hits) { FX.spark(o.x, o.y + 1.25, o.z, 7); SFX.hit(o.x, o.y, o.z, 'clank', false); o.hitAge = 0; } }
 }
 function tryMount() {
   const p = player, h = horses[ME]; if (!p.alive || !h) return;
@@ -596,7 +577,7 @@ function updatePlayer(dt) {
     h.x = clamp(h.x + vx * dt, -WALL, WALL); h.z = clamp(h.z + vz * dt, -WALL, WALL); if (phase === 'deploy') [h.x, h.z] = clampDeploy(ME, h.x, h.z); h.y = H(h.x, h.z);
     advanceHorse(h, dt);
     if (Math.abs(h.spd) > 8 && frameNo % 3 === 0) FX.dust(h.x - fx * 0.8, h.y + 0.2, h.z - fz * 0.8);
-    { const beat = Math.floor(h.cyc * (h.gait === 3 ? 4 : 2)); if (beat !== h._beat) { h._beat = beat; if (Math.abs(h.spd) > 1) SFX.thud(h.x, h.z, h.gait === 3 ? 0.5 : 0.3); } }
+    { const beat = Math.floor(h.cyc * (h.gait === 3 ? 4 : 2)); if (beat !== h._beat) { h._beat = beat; if (Math.abs(h.spd) > 1) SFX.hoof(h.x, h.z, h.gait === 3 ? 0.9 : 0.55); } }
     p.x = h.x; p.z = h.z; p.y = h.y; p.spd = Math.abs(h.spd); p.face = yaw + Math.PI; p.look = clamp(angDiff(h.face, yaw + Math.PI), -1.3, 1.3);
   } else {
     p.look = 0;
@@ -712,7 +693,9 @@ function updateHUD(dt) {
   $('lockmsg').style.display = (document.pointerLockElement || mapOpen || TEST || ended || $('end').style.display === 'flex') ? 'none' : 'block';
   $('netinfo').textContent = (PERF.fps ? `${PERF.fps}fps 画質${{ auto: '自動', high: '高', mid: '中', low: '低' }[LO.q] || '自動'}${LO.q === 'auto' ? `(${Math.round(curPR * 100)}%${usePost ? '' : '・軽量'})` : ''}　` : '') + (NET.mode === 'solo' ? '' : `オンライン（${NET.mode === 'host' ? 'ホスト' : 'ゲスト'}・${NET.via}）部屋 ${NET.room}　${NET.ping ? `遅延 約${NET.ping}ms` : ''}`);
   const rb = $('readyBtn'); if (rb) { rb.style.display = phase === 'deploy' ? 'inline-block' : 'none'; rb.textContent = NET.mode === 'solo' ? `開戦（残り${Math.ceil(deployT)}秒）` : ready.has(ME) ? `準備完了（他の将を待っています ${Math.ceil(deployT)}秒）` : `準備完了（残り${Math.ceil(deployT)}秒）`; }
-  let fight = 0; for (const s of squads) if (s.engaged > 0.1 && Math.hypot(s.cx - player.x, s.cz - player.z) < 90) fight += s.engaged * s.alive.length; SFX.ambient(fight / 160);
+  const bl = [], cp = camera.position; let march = 0, far = 0; for (const s of squads) { const n = s.alive.length; if (!n) continue; if (s.engaged > 0.05) { bl.push({ x: s.cx, z: s.cz, n: s.engaged * n }); far += s.engaged * n; }
+    if (s.moving && Math.hypot(s.cx - cp.x, s.cz - cp.z) < 70) march += n * (s.T.mounted ? 3 : 1) * (1 - Math.hypot(s.cx - cp.x, s.cz - cp.z) / 70); }
+  SFX.setBattle(bl, march, far);
 }
 
 // =====================================================================
@@ -1031,7 +1014,8 @@ function updateCamera(dt) {
 
 function render(dt) {
   const _t0 = performance.now(); frameNo++; windU.value += dt; CLOTH_TIME.value = windU.value;
-  updateViewmodel(dt); updateCamera(dt); FX.update(dt);
+  updateViewmodel(dt); updateCamera(dt); FX.update(dt); SFX.update(dt, camera, player);
+  if (phase === 'deploy' && running) { window._drT = (window._drT || 0) - dt; if (window._drT <= 0) { window._drT = 1.6; SFX.drum(); setTimeout(() => SFX.drum(), 400); } }
   const spMe = spotters(ME), cp = camera.position, cdir = new THREE.Vector3(); camera.getWorldDirection(cdir);
   const all = spectate || elim[ME]; for (const e of ents) if (e.team !== ME) e.seen = e.alive && (all || ally(e.team, ME) || canSee(spMe, e));
   // 兵士
@@ -1309,7 +1293,7 @@ function recvSnap(p) {
     if (!e.alive && (fl & 1)) { e.x = x; e.z = z; e.nx = undefined; e.deadT = 0; e.settled = false; e.shown = undefined; e.mounted = !!e.T.mounted; if (e.h) { e.h.alive = true; e.h.deadT = 0; } } // 援軍で復活
     if (e.nx !== undefined && Math.hypot(x - e.nx, z - e.nz) < 6) { e.vx = (x - e.nx) / (SNAP_MS / 1000); e.vz = (z - e.nz) / (SNAP_MS / 1000); } else { e.vx = e.vz = 0; if (e.nx === undefined || Math.hypot(x - e.x, z - e.z) > 6) { e.x = x; e.z = z; } }
     e.nx = x; e.nz = z; e.nf = f;
-    if (e.alive && !(fl & 1)) { e.x = x; e.z = z; e.px = x; e.pz = z; e.deadT = 0; if (e.h) { e.h.alive = false; e.mounted = false; } }
+    if (e.alive && !(fl & 1)) { if (!(fl & 32) && !e.rout) { SFX.hit(x, e.y, z, e.T.armor ? 'clank' : 'flesh', false); if (Math.random() < 0.4) SFX.grunt(x, e.y, z); } e.x = x; e.z = z; e.px = x; e.pz = z; e.deadT = 0; if (e.h) { e.h.alive = false; e.mounted = false; } }
     e.alive = !!(fl & 1); e.gone = !!(fl & 32); e.rout = !!(fl & 64);
     if (fl & 2 && e.anim <= 0) { e.anim = e.animDur = e.type === 'hero' && e.W ? Math.max((SWINGS[e.swing] || SWINGS.diag).dur, e.W.cd * 0.95) : (e.T.shoot ? 1.0 : 0.6); }
     e.blocking = !!(fl & 8); if (e.type === 'hero') e.mounted = !!(fl & 16);
@@ -1318,6 +1302,7 @@ function recvSnap(p) {
   NET.snapT = now;
   const ns = u8(); for (let i = 0; i < ns; i++) { const s = squads[i]; const ax = i16() / Q, az = i16() / Q, tx = i16() / Q, tz = i16() / Q, face = i16() / 5000, mode = MODES[u8()] || 'hold', pend = u8(), eng = u8() / 255, form = FORM_IDS[u8()] || 'line', rf = u8(), mor = u8();
     s.reinfT = rf ? gameT + rf : 0; s.pending = pend; s.engaged = eng; s.mor = mor; if (deploying && s.team === ME) continue;
+    if (mode === 'charge' && s.mode !== 'charge' && s.alive.length) SFX.warcry(ax, az, s.alive.length);
     Object.assign(s, { ax, az, tx, tz, face, mode, form }); }
   const nm = u8(); msgs.length = 0; for (let i = 0; i < nm; i++) { const team = u8(), si = u8(), x = i16() / Q, z = i16() / Q; const s = squads[si]; msgs.push({ team, squad: s, x, z, y: H(x, z), face: Math.atan2(s.cx - x, s.cz - z), cyc: now / 440 }); }
   const na = u16(); for (let i = 0; i < na; i++) arrows.push({ x: i16() / Q, y: i16() / Q, z: i16() / Q, vx: i16() / 100, vy: i16() / 100, vz: i16() / 100, stuck: 0 });
