@@ -70,6 +70,11 @@ if (view === 'armor') {
   hero(q.get('a') || 'gothic', 'glaive', 0, 0, -1.2, 0, 'barded');
   hero('milanese', 'lance', 3.2, -1.5, -0.9, 1, 'caparison');
   camera.position.set(-1.0, 2.0, 7.5); camera.lookAt(1.0, 1.4, 0);
+} else if (view === 'wp') { // 1本だけ、参考画像と同じ向き（刃が左上、刃先が左下を向く）で
+  scene.background = new THREE.Color(0xf4f4f4); ground.visible = false;
+  const m = new THREE.Mesh(buildWeapon(q.get('wp') || 'glaive', 0, true), mat), c = new THREE.Vector3(-0.735, 0.678, 0), a = new THREE.Vector3(0, 0, -1), b = c.clone().cross(a);
+  m.matrixAutoUpdate = false; m.matrix.makeBasis(a, b, c).setPosition(0.12, 1.5, 0); scene.add(m);
+  camera.position.set(0, 1.55, 7.2); camera.lookAt(0, 1.55, 0); dl.position.set(3, 8, 10);
 } else if (view === 'weapons') {
   WEAPON_IDS.concat(['spear', 'bow']).forEach((id, i) => { const m = new THREE.Mesh(buildWeapon(id, i % 2, true), mat); m.rotation.set(-Math.PI / 2, 0, 0); m.position.set((i - 3.5) * 0.45, 1.6, 0); scene.add(m); m.castShadow = true; });
   ['heater', 'kite', 'pavise'].forEach((k, i) => { const m = new THREE.Mesh(buildShield(i % 2, k, true), mat); m.position.set(2.2 + i * 0.75, 0.7, 0.5); scene.add(m); });

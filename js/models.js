@@ -10,7 +10,7 @@ export const TEAM_CLOTH = [0x1f3f8a, 0x8c1c1c, 0x23602c, 0xb88a16, 0x4e2468];
 export const TEAM_CLOTH2 = [0xc9a646, 0xe8e0cc, 0xe8e0cc, 0x1c1a18, 0xc9a646];
 export const TEAM_GILT = [1, 0, 0, 0, 1];
 
-// [色, 金属度, 粗さ, 材質の種類]  種類: 0=磨いた鋼 1=使い込んだ鋼 2=黒染め 3=真鍮 4=革 5=布 6=鎖帷子 7=その他 8=木
+// [色, 金属度, 粗さ, 材質の種類]  種類: 0=磨いた鋼 1=使い込んだ鋼 2=黒染め 3=真鍮 4=革 5=布 6=鎖帷子 7=その他 8=木 9=赤漆(黒い血管模様) 10=渦巻きを彫った青銅
 const PAL = {
   steel: [0xb3b9c1, 1, 0.28, 0], steelD: [0x7a8089, 1, 0.48, 1], steelL: [0xcdd2d8, 1, 0.22, 0],
   black: [0x26272b, 0.85, 0.4, 2], gold: [0xd4a64c, 1, 0.3, 3], brass: [0xb48a3e, 1, 0.38, 3],
@@ -20,6 +20,7 @@ const PAL = {
   red: [0xa31717, 0, 0.8, 5], rope: [0xb79a6a, 0, 0.9, 5], felt: [0x2e2e35, 0, 0.95, 5], string: [0xddd2b5, 0, 0.9, 7],
   horse: [0x5a3a24, 0, 0.55, 7], horseBlack: [0x1d1714, 0, 0.5, 7], horseD: [0x22160d, 0, 0.7, 7], hoof: [0x1b1816, 0, 0.6, 7],
   yellow: [0xd8b030, 0, 0.8, 5], padding: [0x8f7f63, 0, 0.9, 5],
+  lacquerR: [0xa3121a, 0.05, 0.3, 9], bronzeE: [0xb8893f, 1, 0.4, 10], steelB: [0x46546a, 1, 0.22, 0],
 };
 
 // ---------- 材質：頂点ごとに 金属度・粗さ・種類。種類ごとに傷・汚れ・鎖目・革や木の質感を描画中に計算する ----------
@@ -56,6 +57,18 @@ export function armorMaterial(opts = {}) {
         else if (cls == 3) { roughnessFactor = clamp(roughnessFactor + (n1 - 0.5) * 0.2, 0.15, 0.9); diffuseColor.rgb *= 0.85 + 0.25 * n2; }
         else if (cls == 4) { diffuseColor.rgb *= 0.78 + 0.3 * n1 * n2 + 0.08 * n3; roughnessFactor = clamp(roughnessFactor + (n1 - 0.5) * 0.25, 0.35, 1.0); }
         else if (cls == 5) { diffuseColor.rgb *= 0.88 + 0.16 * n2 + 0.05 * sin(vObj.y * 900.0) * sin(vObj.x * 900.0 + vObj.z * 900.0); }
+        else if (cls == 9) { // 赤漆：黒っぽい血管のような筋が絡み、ところどころ斑に暗い
+          vec3 q = vObj * vec3(17.0, 17.0, 4.5); q += vec3(vn(q * 0.8), vn(q * 0.8 + 7.3), vn(q * 0.8 + 3.1)) * 1.6;
+          float v1 = abs(vn(q) - 0.5), v2 = abs(vn(q * 2.1 + 3.0) - 0.5), vein = smoothstep(0.075, 0.01, v1) + 0.7 * smoothstep(0.045, 0.0, v2);
+          float blot = smoothstep(0.62, 0.8, vn(vObj * vec3(14.0, 14.0, 4.0)));
+          diffuseColor.rgb = mix(diffuseColor.rgb * (0.9 + 0.2 * n2), vec3(0.09, 0.008, 0.015), clamp(vein * 1.1 + blot * 0.6, 0.0, 0.95));
+          roughnessFactor = clamp(roughnessFactor + vein * 0.25, 0.2, 0.7); }
+        else if (cls == 10) { // 青銅の口金：渦巻きの彫り（溝は暗く、山は明るく磨れている）
+          float ang = atan(vObj.y, vObj.x); vec2 q = vec2(ang * 1.3, vObj.z * 17.0); vec2 cell = floor(q); vec2 f = fract(q) - 0.5;
+          f += (vec2(h3(vec3(cell, 1.0)), h3(vec3(cell, 2.0))) - 0.5) * 0.25;
+          float r = length(f), a = atan(f.y, f.x), dir = h3(vec3(cell, 3.0)) > 0.5 ? 1.0 : -1.0;
+          float sp = sin(r * 40.0 - a * dir * 2.0), groove = smoothstep(0.35, 0.9, sp) * smoothstep(0.52, 0.4, r);
+          diffuseColor.rgb *= mix(1.15 + 0.2 * n1, 0.18, groove); roughnessFactor = clamp(mix(roughnessFactor - 0.08, 0.75, groove) + (n1 - 0.5) * 0.15, 0.15, 0.9); }
         else if (cls == 8) { diffuseColor.rgb *= 0.8 + 0.25 * vn(vObj * vec3(30.0, 3.0, 30.0)) + 0.06 * n1; }
         else if (cls == 6) { // 鎖帷子：輪が横に並び、段ごとに半分ずれる
           vec2 q = vec2((vObj.x + vObj.z) * 95.0, vObj.y * 120.0); q.x += 0.5 * floor(q.y);
@@ -68,7 +81,7 @@ export function armorMaterial(opts = {}) {
         vec3 r1 = cross(dpy, normal), r2 = cross(normal, dpx); float det = dot(dpx, r1) * faceDirection; vec3 g = sign(det) * (hx * r1 + hy * r2);
         normal = normalize(abs(det) * normal - g); }`);
   };
-  m.customProgramCacheKey = () => 'armorMR3';
+  m.customProgramCacheKey = () => 'armorMR4';
   return m;
 }
 
@@ -550,7 +563,7 @@ function bladeShape(w, len, tipLen) { const s = new THREE.Shape(); s.moveTo(-w /
   s.quadraticCurveTo(-w * 0.18, len - tipLen * 0.3, -w * 0.32, len - tipLen); s.closePath(); return s; }
 function addAlongZ(gb, geo, z, mat) { gb.add(X(geo, [0, 0, z], [Math.PI / 2, 0, 0]), mat); }
 export const WEAPONS = {
-  glaive: { name: '偃月矛', desc: '三日月形の大刃を長い柄につけた大矛。広く薙ぎ払い、一度に大勢を斬る。重いぶん振りは遅い。', dmg: 40, range: 4.3, cd: 0.95, maxHits: 8, cone: 0.0, swing: 'sweep', twoHand: true, block: 0.4 },
+  glaive: { name: '偃月矛', desc: '長さ約2.9m。反り返った大刃の背に二つの棘、渦巻きを彫った青銅の口金、赤漆の太い柄。広く薙ぎ払い、一度に大勢を斬る。重いぶん振りは遅い。', dmg: 42, range: 4.6, cd: 0.95, maxHits: 8, cone: 0.0, swing: 'sweep', twoHand: true, block: 0.4 },
   longsword: { name: 'ロングソード', desc: '両手持ちの長剣（15世紀ドイツ型）。速さと威力のバランスが良い。', dmg: 32, range: 3.0, cd: 0.55, maxHits: 4, cone: 0.3, swing: 'diag', twoHand: true, block: 0.35 },
   poleaxe: { name: 'ポールアックス', desc: '斧・槌・突き刃を一本にした騎士の長柄武器。鎧ごと叩き割る（盾と鎧の守りを無視しやすい）。', dmg: 58, range: 3.4, cd: 1.0, maxHits: 2, cone: 0.5, swing: 'over', twoHand: true, pierce: true, block: 0.4 },
   mace: { name: 'フランジメイス', desc: '放射状の刃（フランジ）を持つ鋼の槌。板金鎧に強く、盾と一緒に使える。', dmg: 38, range: 2.6, cd: 0.62, maxHits: 2, cone: 0.4, swing: 'over', shield: true, pierce: true, block: 0.15 },
@@ -559,24 +572,21 @@ export const WEAPONS = {
 };
 export const WEAPON_IDS = Object.keys(WEAPONS);
 
+// 偃月矛の刃の輪郭 (u=柄の先へ, v=刃側がマイナス, m)。参考画像の写真から点を拾ってなめらかにつないだもの
+const OKI_BODY = [0.101,-0.076,-0.004,-0.059,0.026,0.050,0.036,0.051,0.045,0.051,0.054,0.051,0.063,0.052,0.074,0.053,0.087,0.056,0.102,0.060,0.119,0.066,0.137,0.072,0.156,0.079,0.175,0.086,0.193,0.093,0.211,0.099,0.229,0.106,0.247,0.112,0.265,0.118,0.283,0.125,0.301,0.131,0.322,0.116,0.342,0.100,0.363,0.085,0.382,0.075,0.400,0.069,0.418,0.067,0.435,0.068,0.451,0.070,0.466,0.074,0.480,0.081,0.493,0.089,0.504,0.098,0.514,0.109,0.522,0.121,0.529,0.133,0.535,0.145,0.541,0.155,0.545,0.165,0.550,0.174,0.554,0.184,0.566,0.178,0.578,0.171,0.590,0.164,0.603,0.159,0.618,0.155,0.635,0.153,0.654,0.151,0.673,0.151,0.693,0.153,0.712,0.157,0.731,0.163,0.749,0.172,0.768,0.182,0.785,0.194,0.802,0.207,0.817,0.222,0.832,0.238,0.846,0.256,0.859,0.275,0.871,0.295,0.882,0.315,0.892,0.337,0.901,0.359,0.911,0.382,0.920,0.404,0.909,0.388,0.901,0.372,0.892,0.354,0.883,0.331,0.872,0.303,0.861,0.270,0.848,0.237,0.834,0.206,0.818,0.175,0.800,0.145,0.781,0.116,0.762,0.089,0.742,0.066,0.722,0.045,0.702,0.028,0.680,0.012,0.655,-0.001,0.628,-0.013,0.598,-0.023,0.566,-0.032,0.532,-0.040,0.495,-0.045,0.456,-0.050,0.417,-0.054,0.378,-0.056,0.337,-0.057,0.297,-0.058,0.262,-0.058,0.235,-0.059,0.215,-0.059,0.198,-0.059,0.180,-0.059];
+const OKI_BAND = [0.186,-0.127,0.204,-0.125,0.221,-0.124,0.241,-0.122,0.266,-0.120,0.300,-0.118,0.340,-0.116,0.383,-0.113,0.424,-0.109,0.464,-0.103,0.504,-0.097,0.543,-0.089,0.580,-0.079,0.614,-0.067,0.646,-0.054,0.676,-0.039,0.704,-0.022,0.729,-0.002,0.751,0.020,0.771,0.044,0.790,0.070,0.809,0.099,0.827,0.131,0.843,0.163,0.858,0.196,0.870,0.230,0.881,0.265,0.890,0.298,0.898,0.327,0.905,0.350,0.910,0.369,0.915,0.386,0.920,0.404,0.909,0.388,0.901,0.372,0.892,0.354,0.883,0.331,0.872,0.303,0.861,0.270,0.848,0.237,0.834,0.206,0.818,0.175,0.800,0.145,0.781,0.116,0.762,0.089,0.742,0.066,0.722,0.045,0.702,0.028,0.680,0.012,0.655,-0.001,0.628,-0.013,0.598,-0.023,0.566,-0.032,0.532,-0.040,0.495,-0.045,0.456,-0.050,0.417,-0.054,0.378,-0.056,0.337,-0.057,0.297,-0.058,0.262,-0.058,0.235,-0.059,0.215,-0.059,0.198,-0.059,0.180,-0.059];
 const WPN_BUILD = {
-  glaive(gb, d) { // 偃月矛：柄 2.5m、三日月の大刃、竜頭の口金、赤い房
-    const cs = d ? 18 : 8, sg = d ? 12 : 6;
-    addAlongZ(gb, cyl(0.02, 0.022, 2.5, sg), 0.25, 'lacquer');
-    for (const z of [-0.95, -0.4, 0.55, 1.1]) addAlongZ(gb, cyl(0.026, 0.026, 0.07, sg), z, 'steelD'); // 彫り込みの節
-    addAlongZ(gb, cyl(0.03, 0.022, 0.06, sg), 1.42, 'gold');
-    gb.add(X(sph(0.05, sg, 8), [0, 0, 1.5], [0, 0, 0], [0.9, 0.9, 1.3]), 'steelD'); // 竜頭の口金
-    gb.add(X(cone(0.03, 0.08, sg), [0, 0.035, 1.53], [-0.4, 0, 0]), 'steelD');
-    addAlongZ(gb, cone(0.022, 0.16, sg), -1.08, 'steelD'); // 石突き
-    gb.add(X(cone(0.028, 0.06, sg), [0, 0, -1.03], [-Math.PI / 2, 0, 0]), 'steelD');
-    const s = new THREE.Shape(); // 刃（u=柄の先へ, v=刃側がマイナス）
-    s.moveTo(0, 0.05); s.lineTo(0, -0.04);
-    s.bezierCurveTo(0.13, -0.24, 0.48, -0.25, 0.7, 0.16);
-    s.bezierCurveTo(0.6, 0.09, 0.5, 0.05, 0.38, 0.06);
-    s.quadraticCurveTo(0.33, 0.12, 0.27, 0.06); // 背の切り欠き
-    s.lineTo(0.1, 0.05); s.closePath();
-    const bg = ext(s, 0.012, 0.007, cs); bg.applyMatrix4(UZVNY); X(bg, [-0.006, 0, 1.53]); gb.add(bg, 'steelL');
-    for (let i = 0; i < (d ? 6 : 3); i++) gb.add(X(cyl(0.008, 0.002, 0.24, 4), [0.03 * Math.cos(i), -0.12, 1.47 + 0.02 * Math.sin(i * 2)], [0.2 * Math.sin(i), 0, 0.25 * Math.cos(i)]), 'red'); // 赤い房
+  glaive(gb, d) { // 偃月矛：全長約2.9m（柄1.65m・口金0.33m・刃0.92m）。参考画像から輪郭を写し取った比率
+    const sg = d ? 20 : 8, Z0 = 1.13; // Z0 = 刃の付け根（口金の上端）
+    addAlongZ(gb, cyl(0.042, 0.043, 1.66, sg), -0.02, 'lacquerR'); // 赤漆の柄
+    addAlongZ(gb, cyl(0.047, 0.047, 0.035, sg), -0.86, 'black'); addAlongZ(gb, cyl(0.038, 0.047, 0.03, sg), -0.89, 'black'); // 石突きの黒い金具
+    addAlongZ(gb, cyl(0.05, 0.05, 0.02, sg), 0.81, 'bronzeE'); // 口金の下の輪
+    { const L = lathe([[0.047, 0], [0.058, 0.02], [0.068, 0.1], [0.079, 0.2], [0.088, 0.29], [0.094, 0.312], [0.09, 0.33], [0.065, 0.345], [0.035, 0.352]], sg); X(L, [0, 0, 0.8], [Math.PI / 2, 0, 0]); gb.add(L, 'bronzeE'); } // 渦巻き彫りの口金
+    if (d) for (const z of [0.83, 1.09]) gb.add(X(tor(z > 1 ? 0.092 : 0.061, 0.004, 4, sg), [0, 0, z]), 'gold');
+    const poly = a => { const sh = new THREE.Shape(); sh.moveTo(a[0], a[1]); for (let i = 2; i < a.length; i += 2) sh.lineTo(a[i], a[i + 1]); sh.closePath(); return sh; };
+    const bt = d ? 0.012 : 0.014, bb = ext(poly(OKI_BODY), bt, d ? 0.004 : 0, 1); bb.applyMatrix4(UZVNY); X(bb, [-bt / 2, 0, Z0]); gb.add(bb, 'steelL'); // 磨いた刃の本体
+    const et = 0.006, eb = ext(poly(OKI_BAND), et, d ? 0.003 : 0, 1); eb.applyMatrix4(UZVNY); X(eb, [-et / 2, 0, Z0]); gb.add(eb, 'steelB'); // 刃先の暗い研ぎ帯（薄い）
+    gb.add(X(box(0.03, 0.12, 0.05), [0, 0, Z0 + 0.012]), 'bronzeE'); // 刃の茎を押さえる座金
   },
   longsword(gb, d) {
     const cs = d ? 12 : 6;

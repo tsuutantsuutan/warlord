@@ -130,7 +130,7 @@ kbd{background:#33281a;border:1px solid #6a5a3a;border-radius:3px;padding:0 5px;
       <div class="row" id="foes"><div class="opt" data-n="1">1軍</div><div class="opt on" data-n="2">2軍</div><div class="opt" data-n="3">3軍</div><div class="opt" data-n="4">4軍</div></div>
       <div class="lbl">敵の兵力（味方の何倍か）</div>
       <div class="row" id="odds"><div class="opt" data-x="1">×1 互角</div><div class="opt" data-x="1.5">×1.5 劣勢</div><div class="opt on" data-x="2">×2 無謀</div><div class="opt" data-x="3">×3 絶望</div></div>
-      <div style="font-size:12px;color:#c9b88a;margin:2px 0 6px">数で負ける戦いは策で勝つ。兵には<b>士気</b>があり、横や後ろから襲われたり、騎兵に突っ込まれたり、損害が増えたりすると崩れて逃げ出す。<b>森に潜んだ部隊からの奇襲</b>は大きく士気をくじく。敵将を討てばその軍は総崩れ。おすすめの戦場は森林・渡河・山岳。</div>
+      <div style="font-size:12px;color:#c9b88a;margin:2px 0 6px">数で負ける戦いは策で勝つ。兵には<b>士気</b>があり、横や後ろから襲われたり、騎兵に突っ込まれたり、損害が増えたりすると崩れて逃げ出す。<b>森に潜んだ部隊からの奇襲</b>は大きく士気をくじく。敵将を討てばその軍は総崩れ。<br><b style="color:#ffd040">総大将</b>：味方と敵それぞれ1人（味方はホスト＝最初の将、地図の★）。<b>総大将を討たれた陣営は、ほかの将が生きていても全軍が崩れて負け</b>。数で負けても敵の総大将の首を取れば勝てる。総大将は打たれ強く、帥旗のまわりの兵は崩れにくい。総大将は <kbd>B</kbd> で味方CPUの軍に号令（攻めよ／守りを固めよ／総大将のもとへ集え）。おすすめの戦場は森林・渡河・山岳。</div>
     </div>
     <div class="lbl" id="teamsLbl">軍の数（大将が討たれた軍から脱落。最後に残った軍の勝ち）</div>
     <div class="row" id="teams">
@@ -157,7 +157,7 @@ kbd{background:#33281a;border:1px solid #6a5a3a;border-radius:3px;padding:0 5px;
       <tr><td><kbd>WASD</kbd> 移動 / <kbd>Shift</kbd> 走る / <kbd>Space</kbd> ジャンプ</td><td><kbd>左クリック</kbd> 攻撃 / <kbd>右クリック</kbd> または <kbd>T</kbd>（押している間）防御</td></tr>
       <tr><td><kbd>E</kbd> 馬に乗る・降りる（騎乗中：W/S 速度、A/D 向き）</td><td><kbd>V</kbd> 一人称 / 三人称の切り替え</td></tr>
       <tr><td><kbd>1</kbd>〜<kbd>0</kbd> 部隊選択（Shift併用で追加）/ <kbd>@</kbd> 全部隊</td><td><kbd>Tab</kbd> 戦場地図</td></tr>
-      <tr><td><kbd>F</kbd> 照準地点へ移動 / <kbd>C</kbd> 照準地点へ突撃</td><td><kbd>H</kbd> 待機 / <kbd>R</kbd> 自分の元へ集結 / <kbd>G</kbd> 護衛にする・外す</td></tr>
+      <tr><td><kbd>F</kbd> 照準地点へ移動 / <kbd>C</kbd> 照準地点へ突撃</td><td><kbd>H</kbd> 待機 / <kbd>R</kbd> 自分の元へ集結 / <kbd>G</kbd> 護衛にする・外す / <kbd>B</kbd> 全軍への号令（協力戦の総大将）</td></tr>
       <tr><td colspan="2"><kbd>Q</kbd>を押しながら<kbd>1</kbd>〜<kbd>7</kbd> 陣形（横隊・一列・縦隊・方陣・楔形・散開・盾壁）。複数の部隊を選ぶと軍全体が並び直す ／ 三人称はホイールで寄る・引く</td></tr>
       <tr><td colspan="2" style="color:#9cf">開戦前に布陣の時間がある（90秒）。地図で部隊をドラッグして並べ、陣形と護衛を決めて Enter。部隊が4分の1を切ると60秒後に本陣から援軍が来る。</td></tr>
       <tr><td colspan="2" style="color:#9f9">兵には士気（部隊一覧の緑のバー）がある。側面・背後・突撃・奇襲・損害で下がり、0になると潰走する。将のそばや戦っていない間は回復し、しばらくすると立て直す。</td></tr>

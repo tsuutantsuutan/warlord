@@ -72,6 +72,11 @@ let MAP = 'hill', SIZE = 2, NT = 2, TEAM_A = [0, Math.PI];
 // 陣営：SIDE[t] が同じ軍どうしは味方（乱戦では全部ちがう）。協力戦では人間側と敵側の2陣営
 let SIDE = [0, 1, 2, 3, 4], COOP = false, ODDS = 1, TEAM_OFF = [], ZW = [];
 const ally = (a, b) => SIDE[a] === SIDE[b];
+// 総大将（協力戦）：陣営ごとに1人。総大将が討たれた陣営は全軍が総崩れ。GEN[陣営]=総大将の軍、STANCE[陣営]=全軍方針
+let GEN = {}, STANCE = {};
+const isGen = t => COOP && GEN[SIDE[t]] === t;
+const STANCE_JP = { attack: '攻めよ', defend: '守りを固めよ', rally: '総大将のもとへ集え' };
+function genNear(team, x, z, r = 60) { if (!COOP) return false; const g = heroes[GEN[SIDE[team]]]; return !!(g && g.alive && Math.abs(g.x - x) < r && Math.abs(g.z - z) < r && Math.hypot(g.x - x, g.z - z) < r); }
 const valleyX = z => 40 * Math.sin(z * 0.011);
 const riverZ = x => 22 * Math.sin(x * 0.011 + 0.6) + 9 * Math.sin(x * 0.029);
 const FORDS = [-150, 150], BRIDGE_X = -10, WATER_Y = -0.7;
@@ -201,7 +206,8 @@ class Squad {
       if (gameT - this.fleeT > 8 && this.mor >= 40 && !near) { this.mode = this.escort && !guards[this.team] ? 'follow' : 'hold'; this.tx = this.ax; this.tz = this.az; teamLog(this.team, `第${this.num}隊(${this.T.name})が踏みとどまり、隊列を立て直した`, '#9f9'); }
     } else {
       const h = heroes[this.team], nearH = h && h.alive && Math.hypot(h.x - this.cx, h.z - this.cz) < 30;
-      if (this.engaged < 0.05) this.mor = Math.min(100, this.mor + (nearH ? 4.5 : 1.5) * dt); else if (nearH) this.mor = Math.min(100, this.mor + 1.2 * dt);
+      const aura = genNear(this.team, this.cx, this.cz) ? 2.5 : 0; // 総大将の旗が見える所では兵が落ち着く
+      if (this.engaged < 0.05) this.mor = Math.min(100, this.mor + ((nearH ? 4.5 : 1.5) + aura) * dt); else if (nearH || aura) this.mor = Math.min(100, this.mor + (nearH ? 1.2 : 0.8) * dt);
       if (this.mor <= 0) breakSquad(this);
     }
     if (this.mode === 'follow') { const h = heroes[this.team]; if (h.alive && !h.squad) { const [nx, nz] = this.followPoint(); if (Math.hypot(nx - this.tx, nz - this.tz) > 3) { this.tx = nx; this.tz = nz; } this.tface = h.face; } }
@@ -230,7 +236,7 @@ class Squad {
   }
 }
 // 士気を削る（将が率いる隊は崩れにくい）
-function shake(s, v) { if (!s || s.mode === 'rout' || s.mode === 'flee') return; const h = s.members[0]; s.mor -= v * (h && h.type === 'hero' && h.alive ? 0.4 : 1); }
+function shake(s, v) { if (!s || s.mode === 'rout' || s.mode === 'flee') return; const h = s.members[0]; if (genNear(s.team, s.cx, s.cz)) v *= 0.65; s.mor -= v * (h && h.type === 'hero' && h.alive ? 0.4 : 1); }
 function breakSquad(s) {
   s.mode = 'flee'; s.fleeT = gameT; s.mor = 0; s.tface = null;
   teamLog(s.team, `第${s.num}隊(${s.T.name})が崩れて逃げ出した！`, '#f86');
@@ -325,6 +331,7 @@ function dealDamage(a, b, base, ranged, pierce) {
     if (b.T.big) { d *= ranged ? 0.4 : 0.75; if (a.T && a.T.charge) d *= 0.5; }
     if (bform === 'shieldwall') d *= ranged ? 0.3 : 0.6;
     if (!ranged && b.shieldKind && b.type !== 'hero' && Math.random() < (bform === 'shieldwall' ? 0.5 : b.T.big ? 0.45 : 0.3) * (a.type === 'hero' ? 0.5 : 1)) { d *= pierce ? 0.6 : 0.25; parried = true; b.blockAge = 0; }
+    if (b.type === 'hero' && isGen(b.team)) d *= 0.7; // 総大将は鍛え方がちがう
     if (b.type === 'hero' && b.blocking) d *= b.W ? (ranged ? Math.min(0.3, b.W.block) : b.W.block) : 0.3;
   }
   const df = b.def || 1; d *= pierce ? 1 - (1 - df) * 0.35 : df;
@@ -459,16 +466,20 @@ function aiThink(team) {
   else if (groups.length) { let best = null, bd = 1e9; for (const g of groups) { const d = Math.hypot(g.x - mx, g.z - mz); if (d < bd) { bd = d; best = g; } } obj = { x: best.x + F.b[0] * 20, z: best.z + F.b[1] * 20 }; }
   else { let best = null, bd = 1e9; for (let t = 0; t < NT; t++) { if (ally(t, team) || elim[t]) continue; const G = teamFrame(t), d = Math.hypot(G.bx - F.bx, G.bz - F.bz); if (d < bd) { bd = d; best = G; } }
     if (!best) best = { bx: 0, bz: 0 }; const dx = best.bx - F.bx, dz = best.bz - F.bz, L = Math.hypot(dx, dz) || 1, p = clamp(gameT * 1.4 - 20, 0, L * 0.5); obj = { x: F.bx + dx / L * p, z: F.bz + dz / L * p }; }
+  const st = COOP ? STANCE[SIDE[team]] || 'attack' : 'attack', G0 = COOP ? heroes[GEN[SIDE[team]]] : null;
+  if (st === 'defend') obj = { x: F.bx - F.b[0] * 55, z: F.bz - F.b[1] * 55 }; // 自陣の前で構える
+  else if (st === 'rally' && G0 && G0.alive && G0.team !== team) obj = { x: G0.x + Math.sin(G0.face) * 18, z: G0.z + Math.cos(G0.face) * 18 }; // 総大将の前に集まる
   let fx = obj.x - F.bx, fz = obj.z - F.bz; { const L = Math.hypot(fx, fz); if (L < 20) { fx = -F.b[0]; fz = -F.b[1]; } else { fx /= L; fz /= L; } }
   const lx = -fz, lz = fx, bx = -fx, bz = -fz; // 横と後ろ（目標に向いたときの）
   const at = (l, d) => ({ x: clamp(obj.x + lx * l + bx * d, -WALL, WALL), z: clamp(obj.z + lz * l + bz * d, -WALL, WALL) });
   for (const s of mine) {
     if (s.pending) continue;
     let near = null, nd = 1e9; for (const g of groups) { const d = Math.hypot(g.x - s.cx, g.z - s.cz); if (d < nd) { nd = d; near = g; } }
+    const reach = st === 'attack' ? 1 : 0.6; nd /= reach; // 守り・集結のときは近くに来た敵にだけ打って出る
     let o; const hp = at(s.home.lx, s.home.d);
     if (s.type === 'cav') {
       let tg = null, td = 1e9; for (const g of groups) { if (!(g.type === 'archer' || g.type === 'hero' || g.n < 8)) continue; const d = Math.hypot(g.x - s.cx, g.z - s.cz); if (d < td) { td = d; tg = g; } }
-      if (tg && td < 160) o = { x: tg.x, z: tg.z, mode: 'charge' };
+      if (tg && td < 160 * reach) o = { x: tg.x, z: tg.z, mode: 'charge' };
       else if (near && nd < 25) o = { x: near.x, z: near.z, mode: 'charge' };
       else o = { ...at(s.home.lx * 1.3, s.home.d + 15), mode: 'move' };
     } else if (s.type === 'archer') { if (near && nd < 65) o = { x: s.ax, z: s.az, mode: 'hold' }; else o = { ...hp, mode: 'move' }; }
@@ -477,7 +488,7 @@ function aiThink(team) {
     if (o.mode !== s.mode || Math.hypot(o.x - s.tx, o.z - s.tz) > 12) sendOrder(team, s, o);
   }
   const h = heroes[team], g = guards[team];
-  if (h.squad && g && mine.length) { const back = h.hp < h.T.hp * 0.4 ? 70 : 40; g.tx = clamp(mx + bx * back, -WALL, WALL); g.tz = clamp(mz + bz * back, -WALL, WALL); g.mode = 'move'; }
+  if (h.squad && g && mine.length) { const back = (h.hp < h.T.hp * 0.4 ? 70 : 40) + (isGen(team) ? 35 : 0); /* 総大将は本陣の奥で全軍を見る */ g.tx = clamp(mx + bx * back, -WALL, WALL); g.tz = clamp(mz + bz * back, -WALL, WALL); g.mode = 'move'; }
 }
 
 // ===== 勝敗：将が討たれた軍は総崩れ。最後に将が残った軍の勝ち =====
@@ -485,7 +496,9 @@ function objectives(dt) {
   if (zone) { const c = new Array(NT).fill(0); for (const e of ents) if (e.alive && !e.rout && Math.hypot(e.x - zone.x, e.z - zone.z) < zone.r) c[e.team]++; zone.c = c;
     let hold = -1, k = 0; for (let t = 0; t < NT; t++) if (c[t] && SIDE[t] !== hold) { hold = SIDE[t]; k++; } zone.holder = k === 1 ? hold : -1;
     if (zone.holder >= 0) for (const e of ents) if (e.alive && ally(e.team, zone.holder) && e.hp < e.T.hp && Math.hypot(e.x - zone.x, e.z - zone.z) < zone.r) e.hp = Math.min(e.T.hp, e.hp + (e.type === 'hero' ? 6 : 1.5) * dt); }
-  for (let t = 0; t < NT; t++) if (!elim[t] && !heroes[t].alive) eliminate(t);
+  for (let t = 0; t < NT; t++) if (!elim[t] && !heroes[t].alive) { eliminate(t);
+    if (isGen(t)) { const by = heroes[t].killer; teamLog(-1, `${COOP && by >= 0 ? TEAM_NAME[by] + '軍が' : ''}総大将・${TEAM_NAME[t]}軍の将を討ち取った！ ${ally(t, ME) ? '味方' : '敵'}の全軍が総崩れ`, '#ffd040');
+      for (let u = 0; u < NT; u++) if (u !== t && ally(u, t) && !elim[u]) { heroes[u].killer = by; eliminate(u); } } }
   const left = new Set(); for (let t = 0; t < NT; t++) if (!elim[t]) left.add(SIDE[t]);
   if (left.size <= 1) finish(left.size ? [...left][0] : -1, 'gen');
 }
@@ -498,14 +511,14 @@ function eliminate(t) {
   const by = heroes[t].killer, who = by >= 0 && !ally(by, t) ? `${TEAM_NAME[by]}軍が` : '';
   if (NET.mode === 'host') pushEv(['elim', t, place[t], by ?? -1]);
   onEliminated(t, place[t], by);
-  log(`${who}${TEAM_NAME[t]}軍の将を討ち取った！ ${TEAM_NAME[t]}軍は総崩れ`, TEAM_CSS[t]);
+  if (heroes[t].alive) log(`総大将を失い、${TEAM_NAME[t]}軍も総崩れ`, TEAM_CSS[t]); else log(`${who}${TEAM_NAME[t]}軍の将を討ち取った！ ${TEAM_NAME[t]}軍は総崩れ`, TEAM_CSS[t]);
 }
 // 自分の軍が負けたときの画面（観戦を続けられる）
 function onEliminated(t, pl, by) {
   elim[t] = true; place[t] = pl;
   if (t === ME && !ended) { document.exitPointerLock?.();
-    $('endt').textContent = '討ち死に'; $('endt').style.color = '#e55';
-    $('ends').innerHTML = `${by >= 0 && !ally(by, t) ? TEAM_NAME[by] + '軍に' : ''}討たれた… ${COOP ? (SIDE.slice(0, NT).filter((x, u) => x === SIDE[ME] && !elim[u]).length ? '味方の将はまだ戦っている' : '') : NT > 2 ? `${NT}軍中 ${pl}位` : ''}<br>戦闘時間 ${fmtT(gameT)} ／ あなたの撃破数 ${player.kills}`;
+    const fell = !player.alive; $('endt').textContent = fell ? '討ち死に' : '総崩れ'; $('endt').style.color = '#e55';
+    $('ends').innerHTML = `${!fell ? '総大将が討たれ、軍が崩れた…' : (by >= 0 && !ally(by, t) ? TEAM_NAME[by] + '軍に' : '') + '討たれた…'} ${COOP && fell ? (SIDE.slice(0, NT).filter((x, u) => x === SIDE[ME] && !elim[u]).length ? '味方の将はまだ戦っている' : '') : NT > 2 ? `${NT}軍中 ${pl}位` : ''}<br>戦闘時間 ${fmtT(gameT)} ／ あなたの撃破数 ${player.kills}`;
     $('spec').style.display = 'inline-block'; $('end').style.display = 'flex'; }
 }
 const fmtT = t => `${Math.floor(t / 60)}分${Math.floor(t % 60)}秒`;
@@ -514,7 +527,7 @@ function end(winTeam, kind) {
   if (ended) return; ended = true; running = !!spectate; document.exitPointerLock?.();
   const win = winTeam >= 0 && ally(winTeam, ME);
   $('endt').textContent = kind === 'drop' ? '中断' : win ? '勝利' : '敗北'; $('endt').style.color = kind === 'drop' ? '#ccc' : win ? '#e8c77a' : '#e55';
-  const why = kind === 'drop' ? 'ホストとの接続が切れた' : win ? (COOP ? (ODDS > 1 ? `${ODDS}倍の敵に勝った！ 敵将をすべて討ち取った` : '敵将をすべて討ち取った！') : NT > 2 ? `最後まで生き残った！ ${NT}軍の頂点` : '敵将を討ち取った！') : COOP ? '味方の将がすべて討たれた…' : winTeam >= 0 ? `${TEAM_NAME[winTeam]}軍の勝利${elim[ME] && NT > 2 ? `（あなたは ${place[ME]}位）` : ''}` : '引き分け';
+  const why = kind === 'drop' ? 'ホストとの接続が切れた' : win ? (COOP ? (ODDS > 1 ? `${ODDS}倍の敵に勝った！ 敵の総大将を討ち、敵全軍が崩れた` : '敵の総大将を討ち、敵全軍が崩れた！') : NT > 2 ? `最後まで生き残った！ ${NT}軍の頂点` : '敵将を討ち取った！') : COOP ? '味方の総大将が討たれ、全軍が崩れた…' : winTeam >= 0 ? `${TEAM_NAME[winTeam]}軍の勝利${elim[ME] && NT > 2 ? `（あなたは ${place[ME]}位）` : ''}` : '引き分け';
   $('ends').innerHTML = `${why}<br>戦闘時間 ${fmtT(gameT)} ／ あなたの撃破数 ${player.kills}`; $('spec').style.display = 'none'; $('end').style.display = 'flex';
 }
 
@@ -680,15 +693,15 @@ function updateHUD(dt) {
     const rf = s.reinfT ? ` <span style="color:#9cf">援軍${Math.max(0, Math.ceil(s.reinfT - gameT))}秒</span>` : '';
     return `<div class="sq ${selected.has(s.num) ? 'sel' : ''} ${n ? '' : 'dead'}"><b>${s.num}</b> ${s.T.name} <span class="cnt">${n}/${s.full}</span> ${mo}<span class="fm2">${FORMS[s.form].name}</span> ${st}${etas.length ? ` ✉${Math.ceil(Math.min(...etas))}秒` : ''}${rf}</div>`;
   }).join('');
-  const armies = [...Array(NT).keys()].map(t => `<span style="color:${TEAM_CSS[t]};${elim[t] ? 'opacity:.4;text-decoration:line-through' : ''}">${TEAM_NAME[t]}${t === ME ? '(あなた)' : COOP && ally(t, ME) ? '(味方)' : ''}</span>`).join(' ');
+  const armies = [...Array(NT).keys()].map(t => `<span style="color:${TEAM_CSS[t]};${elim[t] ? 'opacity:.4;text-decoration:line-through' : ''}">${isGen(t) ? '★' : ''}${TEAM_NAME[t]}${t === ME ? '(あなた)' : COOP && ally(t, ME) ? '(味方)' : ''}</span>`).join(' ');
   let o;
   if (phase === 'deploy') o = `<b style="color:#e8c77a">布陣</b>　開戦まで ${Math.ceil(deployT)}秒　<span style="font-size:12px">Tab の地図で部隊をドラッグして配置 ／ ${NET.mode === 'solo' ? 'Enter で開戦' : 'Enter で準備完了'}</span>`;
   else if (zone) { const hd = zone.holder ?? -1; o = `敵将を討て ／ ${MAPS[MAP].zone ? (MAP === 'mesa' ? '中央台地' : '丘') : ''}：${hd >= 0 ? `<span style="color:${TEAM_CSS[hd]}">${COOP ? (ally(hd, ME) ? '味方' : '敵') : TEAM_NAME[hd] + '軍'}が確保</span>` : '争奪中'}`; }
-  else o = COOP ? `協力戦　敵将をすべて討ち取れ${ODDS > 1 ? `（敵は${ODDS}倍）` : ''}` : NT > 2 ? '乱戦　最後まで将が生き残った軍の勝ち' : '敵将を討ち取れ（敵軍の後方にいる）';
+  else o = COOP ? `協力戦　敵の総大将<span style="color:#ffd040">★</span>を討てば敵全軍が崩れる（味方の★が討たれたら負け）${ODDS > 1 ? `　敵は${ODDS}倍` : ''}${NET.mode !== 'guest' ? `　全軍方針：${STANCE_JP[STANCE[SIDE[ME]]] || '攻めよ'}` : ''}` : NT > 2 ? '乱戦　最後まで将が生き残った軍の勝ち' : '敵将を討ち取れ（敵軍の後方にいる）';
   const al = ents.filter(e => ally(e.team, ME) && e.alive).length, seen = ents.filter(e => !ally(e.team, ME) && e.alive && e.seen).length;
   $('obj').innerHTML = `${o}<br>${armies}　｜　味方 ${al}　見えている敵 ${seen}${spectate ? '　<span style="color:#9cf">観戦中（WASD・Space/C で移動）</span>' : ''}`;
   const h = horses[ME], near = h && !player.mounted && Math.hypot(player.x - h.x, player.z - h.z) < 3.5;
-  $('hint').innerHTML = `<b>F</b> 照準へ移動 <b>C</b> 突撃 <b>H</b> 待機 <b>R</b> 集結 <b>G</b> 護衛 <b>T</b> 構え<br><b>Tab</b> 地図 <b>1-0</b> 部隊 <b>@</b> 全部隊 <b>V</b> 視点 <b>E</b> ${player.mounted ? '下馬' : '乗馬'}<br><b>Q</b>＋数字 陣形（横隊・一列・縦隊・方陣・楔形・散開・盾壁）`;
+  $('hint').innerHTML = `<b>F</b> 照準へ移動 <b>C</b> 突撃 <b>H</b> 待機 <b>R</b> 集結 <b>G</b> 護衛 <b>T</b> 構え${isGen(ME) && NT > 2 ? ' <b>B</b> 全軍方針' : ''}<br><b>Tab</b> 地図 <b>1-0</b> 部隊 <b>@</b> 全部隊 <b>V</b> 視点 <b>E</b> ${player.mounted ? '下馬' : '乗馬'}<br><b>Q</b>＋数字 陣形（横隊・一列・縦隊・方陣・楔形・散開・盾壁）`;
   $('wpninfo').innerHTML = `${WEAPONS[player.wpn].name}　${ARMORS[heroArmor[ME]].name}${player.mounted ? `　<span style="color:#e8c77a">騎乗中 ${Math.round(Math.abs(h.spd) * 3.6)}km/h</span>` : near ? '　<span style="color:#e8c77a">E で乗馬</span>' : ''}`;
   $('lockmsg').style.display = (document.pointerLockElement || mapOpen || TEST || ended || $('end').style.display === 'flex') ? 'none' : 'block';
   $('netinfo').textContent = (PERF.fps ? `${PERF.fps}fps 画質${{ auto: '自動', high: '高', mid: '中', low: '低' }[LO.q] || '自動'}${LO.q === 'auto' ? `(${Math.round(curPR * 100)}%${usePost ? '' : '・軽量'})` : ''}　` : '') + (NET.mode === 'solo' ? '' : `オンライン（${NET.mode === 'host' ? 'ホスト' : 'ゲスト'}・${NET.via}）部屋 ${NET.room}　${NET.ping ? `遅延 約${NET.ping}ms` : ''}`);
@@ -701,6 +714,7 @@ function updateHUD(dt) {
 // =====================================================================
 // 描画
 // =====================================================================
+const genFlags = [];
 let MAT, crowds = [[], []], heroRigs = [null, null], msgCrowds = [null, null], IMarrow, flagIM = [], poleIM, bannerList = [], aimRing, mapImg, mapC, fogC, sun, skyObj, grassIM, grassCenter = null, windU = { value: 0 };
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const TREES = [], O = newOut(), P = newPose(), MW = new THREE.Matrix4(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _c = new THREE.Color();
@@ -924,6 +938,22 @@ function initRender() {
   for (const s of squads) { const cv = document.createElement('canvas'); cv.width = 160; cv.height = 48;
     const tex = new THREE.CanvasTexture(cv); const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, sizeAttenuation: false, transparent: true }));
     sp.scale.set(0.085, 0.0255, 1); sp.renderOrder = 10; scene.add(sp); bannerList.push({ s, sp, cv, tex, key: '' }); }
+  // 帥旗：総大将のうしろに立つ大旗（軍の色に金の縁と「帥」の字）
+  genFlags.length = 0;
+  if (COOP) for (let t = 0; t < NT; t++) { if (!isGen(t)) continue;
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 192; const c = cv.getContext('2d'), col = '#' + TEAM_CLOTH[t].toString(16).padStart(6, '0');
+    c.fillStyle = col; c.fillRect(0, 0, 256, 192); c.strokeStyle = '#d8b04a'; c.lineWidth = 14; c.strokeRect(7, 7, 242, 178);
+    c.fillStyle = '#e8c45a'; for (let k = 0; k < 9; k++) { c.beginPath(); c.moveTo(256, k * 21.3); c.lineTo(238, k * 21.3 + 10); c.lineTo(256, k * 21.3 + 21); c.fill(); }
+    c.fillStyle = '#f1d27a'; c.font = 'bold 140px serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('帥', 120, 100);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const fm = new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.8 });
+    fm.onBeforeCompile = sh => { sh.uniforms.uTime = windU; sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+      transformed.z += sin(position.x * 2.2 - uTime * 3.2) * 0.22 * position.x / 2.6; transformed.y += sin(position.x * 1.7 - uTime * 2.6) * 0.06 * position.x;`); };
+    const g = new THREE.Group(), flag = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.95, 18, 6).translate(1.3, 0, 0), fm); flag.position.y = 6.6; flag.castShadow = true;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 7.8, 8).translate(0, 3.9, 0), new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.7 })); pole.castShadow = true;
+    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.35, 8).translate(0, 7.95, 0), new THREE.MeshStandardMaterial({ color: 0xd4a64c, metalness: 1, roughness: 0.3 }));
+    g.add(flag, pole, fin); scene.add(g); genFlags.push({ t, g, flag }); }
   aimRing = new THREE.Mesh(new THREE.RingGeometry(2.5, 3.2, 32), new THREE.MeshBasicMaterial({ color: 0xffe060, depthTest: false, transparent: true, opacity: 0.8 })); aimRing.rotation.x = -Math.PI / 2; aimRing.renderOrder = 11; scene.add(aimRing);
   FX.init(); initViewmodel();
   // 地図
@@ -1070,6 +1100,10 @@ function render(dt) {
       ctx.fillStyle = '#fff'; ctx.font = 'bold 25px sans-serif'; ctx.textBaseline = 'middle';
       ctx.fillText(mine ? `${s.num} ${s.T.label} ${n}${s.pending ? ' ✉' : ''}` : `${s.T.label} ${n}`, 12, 25); bn.tex.needsUpdate = true; } }
   for (let t = 0; t < NT; t++) flagIM[t].instanceMatrix.needsUpdate = true; poleIM.instanceMatrix.needsUpdate = true;
+  for (const F of genFlags) { const h = heroes[F.t], show = h.alive && (ally(F.t, ME) || h.seen || all); F.g.visible = show; if (!show) continue; // 帥旗は総大将の左うしろ
+    const f = h.face, tx = h.x - Math.sin(f) * 7.5 + Math.cos(f) * 3, tz = h.z - Math.cos(f) * 7.5 - Math.sin(f) * 3; // 旗持ちは将のあとを少し遅れてついてくる
+    if (F.x === undefined || Math.hypot(tx - F.x, tz - F.z) > 40) { F.x = tx; F.z = tz; } else { const dx = tx - F.x, dz = tz - F.z, d = Math.hypot(dx, dz); if (d > 2.5) { const st = Math.min(d - 2.5, 13 * dt); F.x += dx / d * st; F.z += dz / d * st; } }
+    F.g.position.set(F.x, H(F.x, F.z), F.z); F.flag.rotation.y = 0.6; }
   // 草をカメラの周りに敷き直す
   if (!grassCenter || Math.hypot(cp.x - grassCenter.x, cp.z - grassCenter.z) > 10) {
     grassCenter = { x: cp.x, z: cp.z }; let k = 0; const R = 48, q = new THREE.Quaternion();
@@ -1118,6 +1152,7 @@ function drawMap() {
   for (const m of msgs) { if (!ally(m.team, ME) && !all && !canSee(spMe, m)) continue; const [u, v] = toMap(m.x, m.z);
     if (m.team === ME) { const [su, sv] = toMap(m.squad.cx, m.squad.cz); ctx.strokeStyle = 'rgba(255,230,80,.5)'; ctx.beginPath(); ctx.moveTo(u, v); ctx.lineTo(su, sv); ctx.stroke(); }
     ctx.fillStyle = m.team === ME ? '#ffe050' : '#ff9030'; ctx.beginPath(); ctx.arc(u, v, 3.5, 0, 7); ctx.fill(); }
+  if (COOP) for (let t = 0; t < NT; t++) { const g = heroes[t]; if (!isGen(t) || !g.alive || !(ally(t, ME) || g.seen || all)) continue; const [u, v] = toMap(g.x, g.z); ctx.font = 'bold 20px serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.strokeText('★', u, v - 10); ctx.fillStyle = ally(t, ME) ? '#9ef' : '#ffd040'; ctx.fillText('★', u, v - 10); ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'left'; ctx.lineWidth = 1; }
   const hz = horses[ME]; if (hz && !player.mounted) { const [u, v] = toMap(hz.x, hz.z); ctx.fillStyle = '#ffe9a0'; ctx.font = 'bold 16px serif'; ctx.fillText('♞', u, v); }
   const [px, pz] = toMap(player.x, player.z), f2 = player.face, A = MA(), dir = (ang, r) => { const x = Math.sin(ang) * r, z = Math.cos(ang) * r; return [x * Math.cos(A) - z * Math.sin(A), x * Math.sin(A) + z * Math.cos(A)]; };
   ctx.fillStyle = '#fff'; ctx.beginPath(); let d = dir(f2, 9); ctx.moveTo(px + d[0], pz + d[1]); d = dir(f2 + 2.5, 6); ctx.lineTo(px + d[0], pz + d[1]); d = dir(f2 - 2.5, 6); ctx.lineTo(px + d[0], pz + d[1]); ctx.fill();
@@ -1140,6 +1175,14 @@ function mapMove(ev) { // 布陣中：選んだ部隊をまとめてドラッグ
 }
 
 // ===== 入力 =====
+// 総大将の号令：味方CPUの軍の動き方を切り替える（攻めよ → 守りを固めよ → 総大将のもとへ集え）
+function setStance() {
+  if (!COOP || !running || phase !== 'battle') return;
+  if (!isGen(ME)) { log('全軍への号令は総大将（★）だけが出せる', '#fa8'); return; }
+  if (NET.mode === 'guest') return; const k = ['attack', 'defend', 'rally'], sd = SIDE[ME];
+  STANCE[sd] = k[(k.indexOf(STANCE[sd] || 'attack') + 1) % 3]; aiTimer = Math.min(aiTimer, 0.3); hudT = 0; SFX.horn();
+  teamLog(-1, `総大将の号令：全軍、${STANCE_JP[STANCE[sd]]}！`, '#ffd040');
+}
 function selectKey(n, add) { if (!add) selected.clear(); if (selected.has(n) && add) selected.delete(n); else selected.add(n); hudT = 0; }
 function initInput() {
   addEventListener('keydown', e => {
@@ -1150,6 +1193,7 @@ function initInput() {
     if (e.code === 'Backquote' || e.code === 'BracketLeft' || e.key === '@') { selected.clear(); for (const s of squads) if (s.team === ME && s.alive.length && s.mode !== 'follow') selected.add(s.num); hudT = 0; return; }
     if ((e.code === 'Enter' || e.code === 'NumpadEnter') && phase === 'deploy') { pressReady(); return; }
     if (e.code === 'KeyG') orderSelected('escort');
+    if (e.code === 'KeyB' && !e.repeat) setStance();
     if (e.code === 'KeyT' && player.alive && !mapOpen) player.blocking = true; // T を押している間は盾（武器）で構える
     if (e.code === 'KeyF' && !mapOpen) orderSelected('move', aimPoint());
     if (e.code === 'KeyC' && !mapOpen && player.alive) orderSelected('charge', aimPoint());
@@ -1434,7 +1478,8 @@ function startGame(cfg) {
   if (COOP) { // 協力戦：味方の軍を北側に横並び、敵の軍を南側に横並び
     const A = clamp(cfg.allies | 0 || 1, 1, NT - 1);
     for (let t = 0; t < NT; t++) { const mine = t < A, k = mine ? A : NT - A, i = mine ? t : t - A, w = k === 1 ? 125 : (250 - 14 * (k - 1)) / k / 2;
-      SIDE[t] = mine ? 0 : A; TEAM_A[t] = mine ? 0 : Math.PI; TEAM_OFF[t] = (i - (k - 1) / 2) * (2 * w + 14) * (mine ? 1 : -1); ZW[t] = w; } }
+      SIDE[t] = mine ? 0 : A; TEAM_A[t] = mine ? 0 : Math.PI; TEAM_OFF[t] = (i - (k - 1) / 2) * (2 * w + 14) * (mine ? 1 : -1); ZW[t] = w; }
+    GEN = { 0: 0, [A]: A }; STANCE = { 0: 'attack', [A]: 'attack' }; }
   const los = cfg.los || [];
   for (let t = 0; t < NT; t++) { const lo = los[t] || (t === 0 ? LO : cpuLoadout()); los[t] = lo; teamArmor[t] = lo.army; heroArmor[t] = lo.self; heroWpn[t] = lo.wpn; elim[t] = false; }
   zone = MAPS[MAP].zone ? { ...MAPS[MAP].zone, holder: -1 } : null;
@@ -1449,6 +1494,7 @@ function startGame(cfg) {
     NET.tickIv = setInterval(netTick, SNAP_MS);
   }
   log(`あなたは${TEAM_NAME[ME]}軍の将。いまは布陣の時間：Tab の地図で部隊をドラッグして配置、陣形と護衛を決めて ${cfg.mode === 'solo' ? 'Enter で開戦' : 'Enter で準備完了'}`, '#e8c77a');
+  if (COOP) log(`総大将：味方は${TEAM_NAME[GEN[0]]}軍の将${GEN[0] === ME ? '（あなた）' : ''}、敵は${TEAM_NAME[GEN[SIDE[NT - 1]]]}軍の将（地図の★）。総大将が討たれた陣営は全軍が崩れる${GEN[0] === ME && NT > 2 ? '。B で味方CPUへの号令' : ''}`, '#ffd040');
   if (COOP) log(`協力戦：${SIDE.slice(0, NT).filter(x => x === 0).length}軍 対 ${SIDE.slice(0, NT).filter(x => x !== 0).length}軍${ODDS > 1 ? `　敵の兵力は${ODDS}倍。正面からでは勝てない。森の伏兵・側面や背後への突撃・敵将の首で崩せ` : ''}`, '#fd8');
   for (let t = 0; t < NT; t++) if (t !== ME) log(`${TEAM_NAME[t]}軍${COOP ? (ally(t, ME) ? '【味方】' : '【敵】') : ''}${aiTeams.has(t) ? '（CPU）' : ''}：${ARMORS[teamArmor[t]].name}　将：${ARMORS[heroArmor[t]].name}・${WEAPONS[heroWpn[t]].name}`, TEAM_CSS[t]);
   if (TEST && params.has('fight')) startBattle(); else openMap(true);
@@ -1456,7 +1502,7 @@ function startGame(cfg) {
   clock.getDelta(); if (!TEST || !params.has('manual')) setTimeout(loop, 0);
   window.G = { ents, squads, msgs, arrows, step, frame, heroes, horses, NET, sendOrder, openMap, selected, orderSelected, orderFormation, issueOrder, playerAttack, tryMount, keys, FORMS, dealDamage, elim, startBattle, pressReady, deployApply, teamFrame, fw, zoneDims, aiTeams, human,
     get player() { return player }, get gameT() { return gameT }, get ME() { return ME }, get ended() { return ended }, get phase() { return phase }, get deployT() { return deployT }, ready, frameNo: () => frameNo, get NT() { return NT }, get zone() { return zone },
-    set spectate(v) { spectate = v; }, get SIDE() { return SIDE }, get COOP() { return COOP }, breakSquad, moraleTick, view(o) { if (o.yaw !== undefined) yaw = o.yaw; if (o.pitch !== undefined) pitch = o.pitch; if (o.tp !== undefined) thirdPerson = o.tp; },
+    set spectate(v) { spectate = v; }, get GEN() { return GEN }, get STANCE() { return STANCE }, setStance, genFlags, camera: () => camera, get SIDE() { return SIDE }, get COOP() { return COOP }, breakSquad, moraleTick, view(o) { if (o.yaw !== undefined) yaw = o.yaw; if (o.pitch !== undefined) pitch = o.pitch; if (o.tp !== undefined) thirdPerson = o.tp; },
     async shot(name) { frame(0.016); if (mapOpen) drawMap(); const url = (mapOpen && params.has('mapshot') ? mapC : renderer.domElement).toDataURL('image/png'); return (await fetch('/shot?name=' + name, { method: 'POST', body: url })).text(); } };
 }
 
