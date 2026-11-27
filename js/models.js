@@ -568,6 +568,7 @@ export const WEAPONS = {
   poleaxe: { name: 'ポールアックス', desc: '斧・槌・突き刃を一本にした騎士の長柄武器。鎧ごと叩き割る（盾と鎧の守りを無視しやすい）。', dmg: 58, range: 3.4, cd: 1.0, maxHits: 2, cone: 0.5, swing: 'over', twoHand: true, pierce: true, block: 0.4 },
   mace: { name: 'フランジメイス', desc: '放射状の刃（フランジ）を持つ鋼の槌。板金鎧に強く、盾と一緒に使える。', dmg: 38, range: 2.6, cd: 0.62, maxHits: 2, cone: 0.4, swing: 'over', shield: true, pierce: true, block: 0.15 },
   arming: { name: '片手剣と盾', desc: '十字鍔の片手剣とヒーターシールド。速く振れて、盾でしっかり守れる。', dmg: 26, range: 2.7, cd: 0.42, maxHits: 3, cone: 0.35, swing: 'diag', shield: true, block: 0.12 },
+  bow: { name: '長弓', desc: 'イングランドの長弓（約1.8m）。左クリックで引き絞って放つ。矢は照準の先へ飛び、遠いほど山なりに落ちる。鎧を貫く鏃（ボドキン）。近づかれると防ぎにくい。', dmg: 34, range: 2.2, cd: 0.95, maxHits: 1, cone: 0.5, swing: 'draw', bow: true, block: 0.6 },
   lance: { name: 'ランス', desc: '騎乗突撃用の長槍。馬の速さがそのまま威力になる。徒歩ではいまいち。', dmg: 22, range: 4.9, cd: 0.8, maxHits: 2, cone: 0.75, swing: 'thrust', shield: true, lance: true, block: 0.15 },
 };
 export const WEAPON_IDS = Object.keys(WEAPONS);

@@ -358,15 +358,34 @@ function fireArrow(e, t) {
   const a = { x: e.x, y: sy, z: e.z, vx: dx / tt, vz: dz / tt, vy: (ty - sy) / tt + 0.5 * 9.8 * tt, team: e.team, dmg: e.T.arrowDmg * (forestAt(t.x, t.z) ? 0.5 : 1), stuck: 0 };
   arrows.push(a); if (NET.mode === 'host') NET.newArrows.push(a); SFX.bow(e.x, e.z);
 }
+// 将の弓：狙った向きに速い矢を放つ（鎧を貫く）
+function fireHeroArrow(h, dir, pw = 1) {
+  const fp = h === player && !thirdPerson, sx = fp ? camera.position.x + dir.x * 0.6 : h.x + dir.x * 0.5, sy = fp ? camera.position.y - 0.05 + dir.y * 0.6 : h.y + (h.mounted ? 2.5 : 1.55), sz = fp ? camera.position.z + dir.z * 0.6 : h.z + dir.z * 0.5, v = 30 + 38 * pw;
+  const a = { x: sx, y: sy, z: sz, vx: dir.x * v, vy: dir.y * v + 1.2, vz: dir.z * v, team: h.team, dmg: h.W.dmg * (0.35 + 0.65 * pw), stuck: 0, src: h, pierce: true };
+  arrows.push(a); if (NET.mode === 'host') NET.newArrows.push(a); SFX.bow(h.x, h.z);
+}
+// 弓：押している間引き絞り（タメ）、離すと放つ。引きが浅いと弱く近くに落ちる
+const BOW_K0 = 0.22, BOW_KF = 0.55, BOW_REL = 0.62;
+function bowDraw() { const p = player; if (p.cd > 0 || !p.alive || ended || p.drawing || p.anim > 0.05 || mapOpen) return; p.drawing = true; p.drawT = 0; p.animDur = 1; p.anim = 1; if (NET.mode === 'guest') pushEv(['a']); }
+function bowTick(dt) { const p = player; if (!p.drawing) return; if (!p.alive || ended || mapOpen) { p.drawing = false; p.anim = 0; return; }
+  p.drawT += dt; p.animDur = 1; p.anim = 1 - Math.min(BOW_KF, p.drawT * 0.85); }
+function bowLoose() { const p = player; p.drawing = false; const k = 1 - p.anim, pw = clamp((k - BOW_K0) / (BOW_KF - BOW_K0), 0, 1);
+  if (pw < 0.2) { p.anim = Math.min(p.anim, 0.15); return; } // ほとんど引いていない：つがえ直すだけ
+  p.anim = 1 - BOW_REL; p.cd = 0.3; heroBowShot(p, pw); }
+function heroBowShot(h, pw = 1) { // 放つ瞬間：自分はカメラの向き、ゲストはホストへ向きを送る
+  const d = new THREE.Vector3(); camera.getWorldDirection(d);
+  if (NET.mode === 'guest') pushEv(['s', Math.round(d.x * 1000), Math.round(d.y * 1000), Math.round(d.z * 1000), Math.round(pw * 100)]); else fireHeroArrow(h, d, pw);
+  VM.shot = 1; CAM.kick = Math.min(1, CAM.kick + 0.25);
+}
 function updateArrows(dt, visualOnly) {
   for (let i = arrows.length - 1; i >= 0; i--) { const a = arrows[i];
     if (a.stuck > 0) { a.stuck -= dt; if (a.stuck <= 0) arrows.splice(i, 1); continue; }
-    a.vy -= 9.8 * dt; a.x += a.vx * dt; a.y += a.vy * dt; a.z += a.vz * dt;
-    if (!visualOnly) {
-      let hit = null;
-      forNear(a.x, a.z, 1, o => { if (hit || ally(o.team, a.team)) return; if (Math.abs(o.x - a.x) < 0.6 && Math.abs(o.z - a.z) < 0.6 && a.y > o.y && a.y < o.y + (o.mounted ? 2.9 : 2.0)) hit = o; });
-      if (hit) { dealDamage({ x: a.x - a.vx, z: a.z - a.vz, y: a.y, T: {}, team: a.team }, hit, a.dmg, true); arrows.splice(i, 1); continue; }
-    }
+    const ns = Math.max(1, Math.ceil(Math.hypot(a.vx, a.vz) * dt / 0.5)), sdt = dt / ns; let hit = null; // 速い矢はすり抜けないよう細かく進める
+    for (let k = 0; k < ns && !hit; k++) { a.vy -= 9.8 * sdt; a.x += a.vx * sdt; a.y += a.vy * sdt; a.z += a.vz * sdt;
+      if (!visualOnly) forNear(a.x, a.z, 1, o => { if (hit || ally(o.team, a.team) || !o.alive || o === a.src) return; if (Math.abs(o.x - a.x) < 0.6 && Math.abs(o.z - a.z) < 0.6 && a.y > o.y && a.y < o.y + (o.mounted ? 2.9 : 2.0)) hit = o; }); }
+    if (hit) { const att = { x: a.x - a.vx, z: a.z - a.vz, y: a.y, T: {}, team: a.team, type: a.src ? 'hero' : undefined, kills: 0 };
+      dealDamage(att, hit, a.dmg, true, a.pierce); if (a.src) { a.src.kills = (a.src.kills || 0) + att.kills; if (a.src === player) { const el = $('hitm'); el.style.opacity = 1; setTimeout(() => el.style.opacity = 0, 120); } }
+      arrows.splice(i, 1); continue; }
     if (!a.wz && camera && Math.abs(a.x - camera.position.x) < 7 && Math.abs(a.z - camera.position.z) < 7 && Math.abs(a.y - camera.position.y) < 5) { a.wz = 1; SFX.whiz(a.x, a.y, a.z); }
     if (a.y < H(a.x, a.z)) { a.stuck = 8; SFX.thunk(a.x, a.y, a.z); if (arrows.length > 700) arrows.splice(i, 1); }
   }
@@ -575,8 +594,8 @@ function tryMount() {
 // ===== プレイヤー =====
 function updatePlayer(dt) {
   const p = player; if (!p.alive) { specCam(dt); return; }
-  p.cd -= dt; const adt = CAM.hitstop > 0 ? dt * 0.15 : dt; p.anim = Math.max(0, p.anim - adt);
-  if (p.hitAt > 0) { p.hitAt -= adt; if (p.hitAt <= 0) { if (NET.mode === 'guest') guestHit(p); else heroAttack(p); } }
+  p.cd -= dt; const adt = CAM.hitstop > 0 ? dt * 0.15 : dt; p.anim = Math.max(0, p.anim - adt); bowTick(adt);
+  if (p.hitAt > 0) { p.hitAt -= adt; if (p.hitAt <= 0) { if (p.W.bow) heroBowShot(p); else if (NET.mode === 'guest') guestHit(p); else heroAttack(p); } }
   p.headP = clamp(pitch * 0.55, -0.5, 0.4);
   const ctl = !mapOpen && !ended && !dragging, h = horses[ME];
   if (p.mounted && h) {
@@ -737,7 +756,7 @@ function updateHUD(dt) {
 // =====================================================================
 // 描画
 // =====================================================================
-const genFlags = [];
+const genFlags = [], FLAG_BACK = new THREE.Matrix4().makeTranslation(0, 0.08, -0.24);
 let MAT, crowds = [[], []], heroRigs = [null, null], msgCrowds = [null, null], IMarrow, flagIM = [], poleIM, bannerList = [], aimRing, mapImg, mapC, fogC, sun, skyObj, grassIM, grassCenter = null, windU = { value: 0 };
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const TREES = [], O = newOut(), P = newPose(), MW = new THREE.Matrix4(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _c = new THREE.Color();
@@ -973,10 +992,14 @@ function initRender() {
     fm.onBeforeCompile = sh => { sh.uniforms.uTime = windU; sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
       transformed.z += sin(position.x * 2.2 - uTime * 3.2) * 0.22 * position.x / 2.6; transformed.y += sin(position.x * 1.7 - uTime * 2.6) * 0.06 * position.x;`); };
-    const g = new THREE.Group(), flag = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.95, 18, 6).translate(1.3, 0, 0), fm); flag.position.y = 6.6; flag.castShadow = true;
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 7.8, 8).translate(0, 3.9, 0), new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.7 })); pole.castShadow = true;
-    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.35, 8).translate(0, 7.95, 0), new THREE.MeshStandardMaterial({ color: 0xd4a64c, metalness: 1, roughness: 0.3 }));
-    g.add(flag, pole, fin); scene.add(g); genFlags.push({ t, g, flag }); }
+    // 背中に背負う旗（腰の受け金具から竿を立て、上に旗）。胴の骨にくっついて動く
+    const g = new THREE.Group(), flag = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.2, 14, 5).translate(0.8, 0, 0), fm); flag.position.y = 2.75; flag.rotation.y = Math.PI / 2 + 0.25; flag.castShadow = true;
+    const pm = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.7 }), gm = new THREE.MeshStandardMaterial({ color: 0xd4a64c, metalness: 1, roughness: 0.3 });
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.028, 3.45, 8).translate(0, 1.6, 0), pm); pole.castShadow = true;
+    const fin = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.22, 8).translate(0, 3.42, 0), gm);
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.14, 8).translate(0, 0.02, 0), gm); // 腰の受け
+    const clip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.05, 0.06).translate(0, 0.52, 0.02), new THREE.MeshStandardMaterial({ color: 0x2a1c12, roughness: 0.8 })); // 肩の高さの留め具
+    g.add(flag, pole, fin, cup, clip); g.matrixAutoUpdate = false; scene.add(g); genFlags.push({ t, g, flag }); }
   aimRing = new THREE.Mesh(new THREE.RingGeometry(2.5, 3.2, 32), new THREE.MeshBasicMaterial({ color: 0xffe060, depthTest: false, transparent: true, opacity: 0.8 })); aimRing.rotation.x = -Math.PI / 2; aimRing.renderOrder = 11; scene.add(aimRing);
   FX.init(); initViewmodel();
   // 地図
@@ -1002,13 +1025,19 @@ function initViewmodel() {
   const t = ME, parts = buildBody(t, heroArmor[t], true), W = WEAPONS[player.wpn];
   VM.g = new THREE.Group(); camera.add(VM.g); VM.holder = new THREE.Group(); VM.g.add(VM.holder);
   const inner = new THREE.Group(); inner.rotation.y = Math.PI; VM.holder.add(inner);
-  inner.add(new THREE.Mesh(buildWeapon(player.wpn, t, true), MAT));
+  if (!W.bow) inner.add(new THREE.Mesh(buildWeapon(player.wpn, t, true), MAT));
   const gaunt = (z, a) => {
     if (parts.hand) { const h = new THREE.Mesh(parts.hand, MAT); h.position.set(0, 0, z); inner.add(h); const fa = new THREE.Mesh(parts.farm, MAT); const ang = -2.09; fa.rotation.x = ang; const off = new THREE.Vector3(0, -0.28, 0).applyEuler(new THREE.Euler(ang, 0, 0)); fa.position.set(0, -0.075 - off.y, z - off.z); inner.add(fa); return; }
     const m = new THREE.Mesh(parts.farm, MAT); m.rotation.x = a; const off = new THREE.Vector3(0, -0.3, 0).applyEuler(new THREE.Euler(a, 0, 0)); m.position.set(-off.x, -off.y, z - off.z); inner.add(m); };
-  gaunt(0, -1.95); if (W.twoHand) gaunt(-0.32, -2.15);
+  if (W.bow) { initBowVM(parts, inner); VM.g.traverse(o => { o.frustumCulled = false; }); bindVMInput(); return; }
+  VM.q = VMQ[player.wpn] || null; // 矛は「手の位置＋刃の向き」で組む（三人称と同じ持ち方：右手が上、左手は石突き寄り、刃先が前）
+  if (VM.q) { VM.arms = []; for (const [z, sh] of [[0, [0.3, -0.55, 0.12]], [VM.q.rear, [-0.24, -0.55, 0.1]]]) { // 手は柄に、前腕は肩の方へ毎フレーム向ける
+      let hm = null; if (parts.hand) { hm = new THREE.Mesh(parts.hand, MAT); hm.position.set(0, 0, z); inner.add(hm); }
+      const fa = new THREE.Mesh(parts.farm, MAT); VM.g.add(fa); VM.arms.push({ z, fa, sh: new THREE.Vector3(...sh), dy: parts.hand ? -0.075 : 0 }); } } else { gaunt(0, -1.95); if (W.twoHand) gaunt(-0.32, -2.15); }
   if (player.shieldKind) { VM.shield = new THREE.Group(); const sm = new THREE.Mesh(buildShield(t, player.shieldKind, true), MAT); sm.rotation.y = Math.PI; VM.shield.add(sm); const lg = new THREE.Mesh(parts.farm, MAT); lg.rotation.set(-1.4, 0, 0); lg.position.set(0, -0.05, 0.25); VM.shield.add(lg); camera.add(VM.shield); }
-  VM.g.traverse(o => { o.frustumCulled = false; });
+  VM.g.traverse(o => { o.frustumCulled = false; }); bindVMInput();
+}
+function bindVMInput() {
   addEventListener('mousemove', e => { if (document.pointerLockElement) { VM.mdx += e.movementX; VM.mdy += e.movementY; } });
   addEventListener('wheel', e => { if (thirdPerson) CAM.dist = clamp(CAM.dist + Math.sign(e.deltaY) * 0.5, 2.2, 9); }, { passive: true });
 }
@@ -1019,12 +1048,30 @@ const VMP = {
   over: { idle: [[0.32, -0.4, -0.45], [1.05, 0.15, -0.2]], wind: [[0.25, 0.14, -0.22], [2.3, 0.1, -0.1]], hit: [[0.06, -0.48, -0.72], [-0.45, 0, 0]], follow: [[0.0, -0.62, -0.62], [-0.75, -0.05, 0.05]] },
   couch: { idle: [[0.28, -0.4, -0.25], [0.04, 0.1, 0]], wind: [[0.3, -0.36, -0.08], [0.1, 0.12, 0]], hit: [[0.22, -0.37, -0.95], [0, 0.04, 0]], follow: [[0.22, -0.38, -0.85], [0.02, 0.05, 0]] },
 };
+// K(手の位置, 刃の向き, 刃先の向き)：カメラ座標。武器の +z が刃の方向、+y が刃先
+const _vz = new THREE.Vector3(), _vy = new THREE.Vector3(), _vx = new THREE.Vector3(), _vm = new THREE.Matrix4();
+function K(p, d, u) { _vz.set(-d[0], -d[1], -d[2]).normalize(); if (!u) u = [d[2], 0, -d[0]]; // 指定なしは横振りの進む向き（刃の向きを上から見て左回りに90°）
+  _vy.set(u[0], u[1], u[2]); _vy.addScaledVector(_vz, -_vy.dot(_vz)).normalize(); _vx.crossVectors(_vy, _vz);
+  return { p, q: new THREE.Quaternion().setFromRotationMatrix(_vm.makeBasis(_vx, _vy, _vz)) }; }
+const VMQ = {
+  glaive: { rear: -0.55,
+    idle: K([0.2, -0.3, -0.5], [-0.28, 0.5, -0.8], [-0.6, -0.5, -1]),
+    wind: K([0.32, -0.2, -0.42], [0.75, 0.55, -0.55], [-0.4, -0.2, -1]),
+    hit: K([0.04, -0.32, -0.58], [-0.1, 0.06, -1], [-1, -1, 0]),
+    follow: K([-0.24, -0.36, -0.5], [-0.8, 0.0, -0.65], [-0.6, -0.5, 0.8]),
+    block: K([0.02, -0.2, -0.5], [-1, 0.25, -0.12], [0, 1, 0.1]) },
+};
+function qBlend(A, B, t, snap) { const e = t <= 0 ? 0 : t >= 1 ? 1 : snap ? 1 - (1 - t) ** 3 : t * t * (3 - 2 * t);
+  return { p: [0, 1, 2].map(j => A.p[j] + (B.p[j] - A.p[j]) * e), q: A.q.clone().slerp(B.q, e) }; }
+const _qe = new THREE.Quaternion(), _ee = new THREE.Euler();
 function vmBlend(A, B, t) { const e = t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); return [[0, 1, 2].map(j => A[0][j] + (B[0][j] - A[0][j]) * e), [0, 1, 2].map(j => A[1][j] + (B[1][j] - A[1][j]) * e)]; }
 function vmSnap(A, B, t) { const e = t <= 0 ? 0 : t >= 1 ? 1 : 1 - (1 - t) ** 3; return [[0, 1, 2].map(j => A[0][j] + (B[0][j] - A[0][j]) * e), [0, 1, 2].map(j => A[1][j] + (B[1][j] - A[1][j]) * e)]; }
 function updateViewmodel(dt) {
   const fp = !thirdPerson && player.alive && !ended; VM.g.visible = fp; if (VM.shield) VM.shield.visible = fp;
   CAM.hitstop = Math.max(0, CAM.hitstop - dt); CAM.kick = Math.max(0, CAM.kick - dt * 5); CAM.shake = Math.max(0, CAM.shake - dt * 2.2);
-  if (!fp) return;
+  if (!fp) { if (camera.fov !== 72) { camera.fov = 72; camera.updateProjectionMatrix(); if (VM.bow) VM.bow.zoom = 72; } return; }
+  if (VM.bow) return updateBowVM(dt);
+  if (VM.q) return updateVMQ(dt);
   const pz = VMP[player.swing === 'thrust' ? 'couch' : player.swing] || VMP.diag; let pose = pz.idle;
   if (player.anim > 0) { const k = 1 - player.anim / player.animDur, hit = (SWINGS[player.swing] || SWINGS.diag).hit, w0 = hit * 0.8, h1 = hit + 0.08, f1 = hit + 0.3;
     if (k < w0) pose = vmBlend(pz.idle, pz.wind, k / w0);
@@ -1043,6 +1090,74 @@ function updateViewmodel(dt) {
   VM.holder.rotation.set(pose[1][0] - VM.sp * 0.35 - CAM.kick * 0.06, pose[1][1] + VM.sx * 2, pose[1][2] + rz + VM.sp * 0.3, 'YXZ');
   if (VM.shield) { const b = player.blocking ? 1 : 0; VM.sb += (b - VM.sb) * Math.min(1, dt * 12);
     VM.shield.position.set(-0.42 + VM.sb * 0.27 + bx + VM.sx, -0.48 + VM.sb * 0.26 + by + VM.sy, -0.62 + VM.sb * 0.12); VM.shield.rotation.set(0, 0.55 - VM.sb * 0.5, 0); }
+}
+function vmSway(dt) {
+  const h = horses[ME], amt = clamp(player.spd / 5, 0, 1), sprint = !player.mounted && player.spd > 7 ? 1 : 0;
+  let bx = 0, by = Math.sin(windU.value * 1.6) * 0.004;
+  if (player.mounted && h) { const u = (h.cyc || 0) % 1, g = h.gait || 0; by += g === 3 ? Math.sin(u * Math.PI * 2 - 0.6) * 0.03 : g ? Math.abs(Math.sin(u * Math.PI * 4)) * (g === 2 ? 0.025 : 0.01) : 0; }
+  else { bx = Math.sin(player.phase) * 0.018 * amt; by += -Math.abs(Math.cos(player.phase)) * 0.022 * amt; }
+  VM.sx += (-VM.mdx * 0.0009 - VM.sx) * Math.min(1, dt * 10); VM.sy += (VM.mdy * 0.0009 - VM.sy) * Math.min(1, dt * 10); VM.mdx *= 0.5; VM.mdy *= 0.5;
+  VM.sp = (VM.sp || 0) + (sprint - (VM.sp || 0)) * Math.min(1, dt * 6); VM.land = Math.max(0, VM.land - dt * 4); if (player.air) VM.land = 0.6;
+  return [bx, by];
+}
+function updateVMQ(dt) {
+  const Q = VM.q; let pose = Q.idle;
+  if (player.anim > 0) { const k = 1 - player.anim / player.animDur, hit = (SWINGS[player.swing] || SWINGS.diag).hit, w0 = hit * 0.75, h1 = hit + 0.06, f1 = hit + 0.3;
+    if (k < w0) pose = qBlend(Q.idle, Q.wind, k / w0);
+    else if (k < h1) pose = qBlend(Q.wind, Q.hit, (k - w0) / (h1 - w0), true);
+    else if (k < f1) pose = qBlend(Q.hit, Q.follow, (k - h1) / (f1 - h1));
+    else pose = qBlend(Q.follow, Q.idle, (k - f1) / (1 - f1)); }
+  VM.qb = (VM.qb || 0) + ((player.blocking && player.anim <= 0 ? 1 : 0) - (VM.qb || 0)) * Math.min(1, dt * 12);
+  if (VM.qb > 0.01) pose = qBlend(pose, Q.block, VM.qb);
+  const [bx, by] = vmSway(dt);
+  VM.holder.position.set(pose.p[0] + bx + VM.sx + VM.sp * 0.08, pose.p[1] + by + VM.sy - VM.sp * 0.08 - VM.land * 0.03, pose.p[2]);
+  VM.holder.quaternion.copy(pose.q).premultiply(_qe.setFromEuler(_ee.set(-VM.sp * 0.25 - CAM.kick * 0.06, VM.sx * 2, VM.sp * 0.2, 'YXZ')));
+  for (const A of VM.arms) { const w = _vx.set(0, A.dy, -A.z).applyQuaternion(VM.holder.quaternion).add(VM.holder.position), d = _vy.copy(A.sh).sub(w).normalize();
+    A.fa.position.copy(w).addScaledVector(d, 0.3); A.fa.quaternion.setFromUnitVectors(_vz.set(0, -1, 0), d.negate()); }
+}
+// 一人称の弓：左手で弓を握り、右手で弦を引く。弓の座標は 縦=+z（上の弭）、前=+y（矢の飛ぶ向き）、握り=原点
+function initBowVM(parts, inner) {
+  const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a2e, roughness: 0.55 }), str = new THREE.MeshStandardMaterial({ color: 0xe8e0c8, roughness: 0.9 });
+  const lim = d => new THREE.CatmullRomCurve3([[0, -0.16, -0.9], [0, -0.05, -0.45], [0, 0, 0], [0, -0.05, 0.45], [0, -0.16, 0.9]].map(([x, y, z]) => new THREE.Vector3(x, y, z)));
+  const bowM = new THREE.Mesh(new THREE.TubeGeometry(lim(), 40, 0.016, 8), wood); inner.add(bowM);
+  for (const z of [-0.9, 0.9]) { const n = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), new THREE.MeshStandardMaterial({ color: 0xd8c8a0, roughness: 0.6 })); n.position.set(0, -0.16, z); inner.add(n); } // 角の弭
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, 10), new THREE.MeshStandardMaterial({ color: 0x4a2e1a, roughness: 0.9 })); grip.rotation.x = Math.PI / 2; inner.add(grip);
+  const sg = new THREE.CylinderGeometry(0.0022, 0.0022, 1, 4).translate(0, 0.5, 0), s1 = new THREE.Mesh(sg, str), s2 = new THREE.Mesh(sg, str); inner.add(s1, s2);
+  const ar = new THREE.Group(); { const sh = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 0.8, 6).translate(0, 0.4, 0), new THREE.MeshStandardMaterial({ color: 0xb08a5a, roughness: 0.7 }));
+    const hd = new THREE.Mesh(new THREE.ConeGeometry(0.009, 0.06, 4).translate(0, 0.83, 0), new THREE.MeshStandardMaterial({ color: 0x555a60, metalness: 1, roughness: 0.35 }));
+    ar.add(sh, hd); for (let k = 0; k < 3; k++) { const f = new THREE.Mesh(new THREE.BoxGeometry(0.002, 0.1, 0.022).translate(0, 0.07, 0.013), new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 1 })); f.rotation.y = k * Math.PI * 2 / 3; ar.add(f); } }
+  const arW = ar; inner.add(arW); // 矢は弓の +y 向き（つがえた所が原点）
+  let lh = null, rh = null; if (parts.hand) { lh = new THREE.Mesh(parts.hand, MAT); inner.add(lh); rh = new THREE.Mesh(parts.hand, MAT); inner.add(rh); }
+  const armM = new THREE.MeshStandardMaterial({ color: 0xb4bac2, metalness: 0.9, roughness: 0.32 }); // 弓の腕は肩まで伸びる籠手（筒の口が見えないように）
+  const armG = new THREE.CylinderGeometry(0.042, 0.06, 0.75, 14, 1, false).translate(0, -0.375, 0);
+  const fl = new THREE.Mesh(armG, armM), fr = new THREE.Mesh(armG, armM); VM.g.add(fl, fr);
+  for (const y of [-0.04, -0.3]) { const r = new THREE.Mesh(new THREE.TorusGeometry(0.046 + -y * 0.02, 0.006, 6, 18), new THREE.MeshStandardMaterial({ color: 0xc9a24c, metalness: 1, roughness: 0.3 })); r.rotation.x = Math.PI / 2; r.position.y = y; fl.add(r); }
+  VM.bow = { s1, s2, ar: arW, lh, rh, fl, fr, pull: 0, vib: 0,
+    idle: K([-0.24, -0.36, -0.66], [-0.4, 0.85, -0.35], [0.2, 0.2, -1]), aim: K([-0.075, -0.05, -0.78], [-0.32, 1, 0], [0.0025, 0.0018, -1]) };
+}
+const _bA = new THREE.Vector3(), _bB = new THREE.Vector3(), _bU = new THREE.Vector3(0, 1, 0), _bD = new THREE.Vector3(0, -1, 0), _bT = new THREE.Vector3(0, -0.16, 0.9), _bL = new THREE.Vector3(0, -0.16, -0.9);
+function bowString(m, a, b) { _bB.copy(b).sub(a); const L = _bB.length(); m.position.copy(a); m.quaternion.setFromUnitVectors(_bU, _bB.divideScalar(L)); m.scale.set(1, L, 1); }
+function updateBowVM(dt) {
+  const B = VM.bow; let pose = B.idle, pull = 0, arrow = true;
+  if (player.anim > 0) { const k = 1 - player.anim / player.animDur, rel = (SWINGS.draw || {}).hit || 0.62;
+    if (k < BOW_K0) pose = qBlend(B.idle, B.aim, k / BOW_K0);
+    else if (k < rel) { pose = B.aim; pull = clamp((k - BOW_K0) / (BOW_KF - BOW_K0), 0, 1); pull = 1 - (1 - pull) ** 2; }
+    else { pose = k < 0.78 ? B.aim : qBlend(B.aim, B.idle, (k - 0.78) / 0.22); arrow = k > 0.9; if (B.pull > 0.5) B.vib = 1; } }
+  B.pull = pull; B.vib = Math.max(0, B.vib - dt * 5);
+  const fov = 72 - 16 * pull * (player.drawing ? 1 : 0); B.zoom = (B.zoom ?? 72) + (fov - (B.zoom ?? 72)) * Math.min(1, dt * (fov < (B.zoom ?? 72) ? 6 : 10)); // 引き絞るとすこしズーム
+  if (Math.abs(camera.fov - B.zoom) > 0.01) { camera.fov = B.zoom; camera.updateProjectionMatrix(); }
+  const [bx, by] = vmSway(dt), kick = B.vib * 0.02;
+  VM.holder.position.set(pose.p[0] + bx + VM.sx, pose.p[1] + by + VM.sy - VM.land * 0.03, pose.p[2] + kick);
+  VM.holder.quaternion.copy(pose.q).premultiply(_qe.setFromEuler(_ee.set(-VM.sp * 0.25 - CAM.kick * 0.04 + B.vib * 0.03, VM.sx * 2, VM.sp * 0.2, 'YXZ')));
+  // 弦：上下の弭から引き手（つがえた所）へ。離した直後は小さく震える
+  const ny = -0.16 - pull * 0.42 + Math.sin(B.vib * 40) * B.vib * 0.012, nock = _bA.set(0, ny, 0);
+  bowString(B.s1, _bT, nock); bowString(B.s2, _bL, nock);
+  B.ar.visible = arrow; B.ar.position.set(0.012, ny, 0);
+  const rv = pull > 0.35; B.fr.visible = false; // 引き手の前腕は顔の横で画面の外 if (B.lh) { B.lh.position.set(0, 0, 0); B.rh.position.set(0.0, ny - 0.03, -0.03); B.rh.visible = rv; } // 引き手は引いている間だけ（ほかは画面の外）
+  // 前腕は肩の方へ（左手=握り、右手=弦）
+  const inv = _qe.copy(VM.holder.quaternion), toCam = v => v.set(-v.x, v.y, -v.z).applyQuaternion(inv).add(VM.holder.position); // inner は y 回りに半回転
+  for (const [fa, w, sh] of [[B.fl, toCam(_vx.set(0, -0.075, 0)), [-0.55, -0.75, -0.1]], [B.fr, toCam(_vy.set(0, ny - 0.03, -0.03)), [0.35, -0.55, 0.3]]]) {
+    const d = _vz.set(...sh).sub(w).normalize(); fa.position.copy(w); fa.quaternion.setFromUnitVectors(_bD, d); } // 手首から肩の方へ伸ばす
 }
 function updateCamera(dt) {
   const p = player, h = horses[ME];
@@ -1123,10 +1238,9 @@ function render(dt) {
       ctx.fillStyle = '#fff'; ctx.font = 'bold 25px sans-serif'; ctx.textBaseline = 'middle';
       ctx.fillText(mine ? `${s.num} ${s.T.label} ${n}${s.pending ? ' ✉' : ''}` : `${s.T.label} ${n}`, 12, 25); bn.tex.needsUpdate = true; } }
   for (let t = 0; t < NT; t++) flagIM[t].instanceMatrix.needsUpdate = true; poleIM.instanceMatrix.needsUpdate = true;
-  for (const F of genFlags) { const h = heroes[F.t], show = h.alive && (ally(F.t, ME) || h.seen || all); F.g.visible = show; if (!show) continue; // 帥旗は総大将の左うしろ
-    const f = h.face, tx = h.x - Math.sin(f) * 7.5 + Math.cos(f) * 3, tz = h.z - Math.cos(f) * 7.5 - Math.sin(f) * 3; // 旗持ちは将のあとを少し遅れてついてくる
-    if (F.x === undefined || Math.hypot(tx - F.x, tz - F.z) > 40) { F.x = tx; F.z = tz; } else { const dx = tx - F.x, dz = tz - F.z, d = Math.hypot(dx, dz); if (d > 2.5) { const st = Math.min(d - 2.5, 13 * dt); F.x += dx / d * st; F.z += dz / d * st; } }
-    F.g.position.set(F.x, H(F.x, F.z), F.z); F.flag.rotation.y = 0.6; }
+  for (const F of genFlags) { const h = heroes[F.t], R = heroRigs[F.t]; // 帥旗は総大将の背中（一人称の自分は見えないようにする）
+    const show = h.alive && (ally(F.t, ME) || h.seen || all) && !(F.t === ME && !thirdPerson) && R.meshes.torso[0].visible; F.g.visible = show; if (!show) continue;
+    F.g.matrix.copy(R.O.p.torso[0]).multiply(FLAG_BACK); F.g.matrixWorldNeedsUpdate = true; }
   // 草をカメラの周りに敷き直す
   if (!grassCenter || Math.hypot(cp.x - grassCenter.x, cp.z - grassCenter.z) > 10) {
     grassCenter = { x: cp.x, z: cp.z }; let k = 0; const R = 48, q = new THREE.Quaternion();
@@ -1234,8 +1348,8 @@ function initInput() {
     if (e.target.closest('[data-esc]')) { e.stopPropagation(); orderSelected('escort'); } if (e.target.closest('#readyBtn')) { e.stopPropagation(); pressReady(); } });
   $('gl').addEventListener('click', () => { if (running && !mapOpen) { try { $('gl').requestPointerLock()?.catch?.(() => {}); } catch (e) {} } });
   addEventListener('mousemove', e => { if (document.pointerLockElement !== $('gl')) return; yaw -= e.movementX * 0.0022; pitch = clamp(pitch - e.movementY * 0.0022, -1.4, 1.4); });
-  addEventListener('mousedown', e => { if (document.pointerLockElement !== $('gl') || !player.alive) return; if (e.button === 0 && phase !== 'deploy') playerAttack(); if (e.button === 2) player.blocking = true; });
-  addEventListener('mouseup', e => { if (e.button === 2 && player && !keys.KeyT) player.blocking = false; });
+  addEventListener('mousedown', e => { if (document.pointerLockElement !== $('gl') || !player.alive) return; if (e.button === 0 && phase !== 'deploy') { if (player.W.bow) bowDraw(); else playerAttack(); } if (e.button === 2) player.blocking = true; });
+  addEventListener('mouseup', e => { if (e.button === 0 && player && player.drawing) bowLoose(); if (e.button === 2 && player && !keys.KeyT) player.blocking = false; });
   addEventListener('contextmenu', e => e.preventDefault());
   mapC.addEventListener('mousedown', mapEvent); addEventListener('mousemove', mapMove);
   addEventListener('mouseup', () => { if (dragging) { if (NET.mode === 'guest') for (const s of selectedSquads()) deployApply(s, {}); dragging = null; } });
@@ -1409,6 +1523,7 @@ function recvInput(s, id) {
       heroAttack(e, hits.slice(0, e.W.maxHits)); }
     else if (ev[1] === 'o' && running && phase === 'battle') { const sq = squads[ev[2] | 0]; if (sq && sq.team === t && MODES.includes(ev[3])) sendOrder(t, sq, { mode: ev[3], x: clamp(+ev[4] || 0, -WALL, WALL), z: clamp(+ev[5] || 0, -WALL, WALL), form: FORMS[ev[6]] ? ev[6] : undefined, face: typeof ev[7] === 'number' ? ev[7] : undefined }); }
     else if (ev[1] === 'd' && phase === 'deploy') { const sq = squads[ev[2] | 0]; if (sq && sq.team === t) { [sq.ax, sq.az] = clampDeploy(t, +ev[3] || 0, +ev[4] || 0); sq.face = +ev[5] || 0; sq.form = FORM_IDS[ev[6] | 0] || 'line'; sq.mode = ev[7] ? 'follow' : 'hold'; sq.escort = !!ev[7]; sq.tx = sq.ax; sq.tz = sq.az; sq.snap(); } }
+    else if (ev[1] === 's' && e.alive && e.W && e.W.bow && running && phase === 'battle') { const d = new THREE.Vector3(+ev[2] || 0, +ev[3] || 0, +ev[4] || 0); if (d.lengthSq() > 0.01) fireHeroArrow(e, d.normalize(), clamp((+ev[5] || 100) / 100, 0.2, 1)); } // ゲストの弓
     else if (ev[1] === 'r') ready.add(t);
   }
 }
@@ -1464,7 +1579,7 @@ function step(dt) {
   if (phase === 'deploy') { deployTick(dt, false); buildGrid(); updatePlayer(dt); for (let t = 0; t < NT; t++) { const h = heroes[t]; if (h !== player && !h.squad) { advanceWalk(h, dt); if (horses[t]) advanceHorse(horses[t], dt); } } return; }
   gameT += dt; buildGrid();
   for (const s of squads) s.update(dt);
-  for (const e of ents) { if (!e.alive) continue; if (e.type === 'hero' && !e.squad) { if (e !== player) { e.anim = Math.max(0, e.anim - dt); e.cd -= dt; if (e.hitAt > 0) { e.hitAt -= dt; if (e.hitAt <= 0) heroAttack(e); } advanceWalk(e, dt); const hh = horses[e.team]; if (hh) advanceHorse(hh, dt); } continue; }
+  for (const e of ents) { if (!e.alive) continue; if (e.type === 'hero' && !e.squad) { if (e !== player) { e.anim = Math.max(0, e.anim - dt); e.cd -= dt; if (e.hitAt > 0) { e.hitAt -= dt; if (e.hitAt <= 0 && !e.W.bow) heroAttack(e); } advanceWalk(e, dt); const hh = horses[e.team]; if (hh) advanceHorse(hh, dt); } continue; }
     e.anim = Math.max(0, e.anim - dt); soldierAI(e, dt);
     if (e.mounted && e.spd > 8 && frameNo % 6 === e.id % 6 && Math.hypot(e.x - camera.position.x, e.z - camera.position.z) < 100) FX.dust(e.x, e.y + 0.2, e.z); }
   updatePlayer(dt);
@@ -1492,7 +1607,7 @@ function loop() { requestAnimationFrame(loop); const raw = clock.getDelta(); aut
 const pick = a => a[Math.floor(Math.random() * a.length)];
 function pickFoe(self) { return pick(ARMOR_IDS.filter(a => a !== self)); }
 // CPUの軍の装備と編成（ホストが決めて全員に配る）
-function cpuLoadout() { return { self: pickFoe(''), wpn: pick(WEAPON_IDS.filter(w => w !== 'lance')), army: LO.foe !== 'auto' ? LO.foe : pickFoe(LO.army), comp: pick(CPU_COMPS), cpu: 1 }; }
+function cpuLoadout() { return { self: pickFoe(''), wpn: pick(WEAPON_IDS.filter(w => w !== 'lance' && w !== 'bow')), army: LO.foe !== 'auto' ? LO.foe : pickFoe(LO.army), comp: pick(CPU_COMPS), cpu: 1 }; }
 function startGame(cfg) {
   if (running || player) return;
   MAP = MAPS[cfg.map] ? cfg.map : 'hill'; SIZE = cfg.size; NET.mode = cfg.mode; NT = clamp(cfg.nt | 0 || 2, 2, MAP === 'mountain' ? 2 : 5);
@@ -1525,9 +1640,9 @@ function startGame(cfg) {
   if (TEST && params.has('fight')) startBattle(); else openMap(true);
   if (!TEST && !mapOpen) { try { $('gl').requestPointerLock()?.catch?.(() => {}); } catch (e) {} }
   clock.getDelta(); if (!TEST || !params.has('manual')) setTimeout(loop, 0);
-  window.G = { ents, squads, msgs, arrows, step, frame, heroes, horses, NET, sendOrder, openMap, selected, orderSelected, orderFormation, issueOrder, playerAttack, tryMount, keys, FORMS, dealDamage, elim, startBattle, pressReady, deployApply, teamFrame, fw, zoneDims, aiTeams, human,
+  window.G = { bowDraw, bowLoose, ents, squads, msgs, arrows, step, frame, heroes, horses, NET, sendOrder, openMap, selected, orderSelected, orderFormation, issueOrder, playerAttack, tryMount, keys, FORMS, dealDamage, elim, startBattle, pressReady, deployApply, teamFrame, fw, zoneDims, aiTeams, human,
     get player() { return player }, get gameT() { return gameT }, get ME() { return ME }, get ended() { return ended }, get phase() { return phase }, get deployT() { return deployT }, ready, frameNo: () => frameNo, get NT() { return NT }, get zone() { return zone },
-    set spectate(v) { spectate = v; }, get GEN() { return GEN }, get STANCE() { return STANCE }, setStance, genFlags, camera: () => camera, applyPreset, LO, get SIDE() { return SIDE }, get COOP() { return COOP }, breakSquad, moraleTick, view(o) { if (o.yaw !== undefined) yaw = o.yaw; if (o.pitch !== undefined) pitch = o.pitch; if (o.tp !== undefined) thirdPerson = o.tp; },
+    set spectate(v) { spectate = v; }, get GEN() { return GEN }, get VM() { return VM }, get STANCE() { return STANCE }, setStance, genFlags, camera: () => camera, applyPreset, LO, get SIDE() { return SIDE }, get COOP() { return COOP }, breakSquad, moraleTick, view(o) { if (o.yaw !== undefined) yaw = o.yaw; if (o.pitch !== undefined) pitch = o.pitch; if (o.tp !== undefined) thirdPerson = o.tp; },
     async shot(name) { frame(0.016); if (mapOpen) drawMap(); const url = (mapOpen && params.has('mapshot') ? mapC : renderer.domElement).toDataURL('image/png'); return (await fetch('/shot?name=' + name, { method: 'POST', body: url })).text(); } };
 }
 
