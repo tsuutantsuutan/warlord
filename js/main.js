@@ -691,9 +691,12 @@ function applyPreset(k) {
   if (!mine.length) return;
   const lay = presetLayout(k, mine.map(s => ({ num: s.num, type: s.type, n: s.alive.length, esc: false })));
   let ax, az, F;
+  const gen = P.gen || [0, 0]; let gx = 0, gz = 0; // 戦闘中は「将の位置」を自分に合わせる
   if (phase === 'deploy') { [ax, az] = fw(ME, 0, zoneDims(ME).d1 - 6); F = teamFrame(ME).face; }
-  else { ax = player.x; az = player.z; if (mapOpen) { let sx = 0, sz = 0; for (const s of mine) { sx += Math.sin(s.face); sz += Math.cos(s.face); } F = Math.atan2(sx, sz); } else F = yaw + Math.PI; }
+  else { ax = player.x; az = player.z; gx = gen[0]; gz = gen[1]; if (mapOpen) { let sx = 0, sz = 0; for (const s of mine) { sx += Math.sin(s.face); sz += Math.cos(s.face); } F = Math.atan2(sx, sz); } else F = yaw + Math.PI; }
   const fx = Math.sin(F), fz = Math.cos(F), rx = -Math.cos(F), rz = Math.sin(F);
+  for (const L of lay) { L.px -= gx; L.pz -= gz; }
+  if (phase === 'deploy' && !player.mounted) { const [px, pz] = clampDeploy(ME, ax + rx * gen[0] + fx * gen[1], az + rz * gen[0] + fz * gen[1]); player.x = px; player.z = pz; player.y = H(px, pz); player.face = F; yaw = F - Math.PI; } // 布陣中は将もその位置へ
   mine.forEach((s, i) => { const L = lay[i]; issueOrder(s, { mode: 'move', x: clamp(ax + rx * L.px + fx * L.pz, -WALL, WALL), z: clamp(az + rz * L.px + fz * L.pz, -WALL, WALL), form: L.form, face: F + L.pf }); });
   log(`陣形プリセット「${P.name}」${phase === 'deploy' ? 'に並べた' : `を伝令（${mine.length}部隊）`}`, '#e8c77a'); showFormMenu(false);
 }
@@ -1652,7 +1655,7 @@ const PSE = {
     const c = $('pcv'); if (!this.inited) { this.inited = true; this.bind(c); }
     $('psSlots').innerHTML = LO.presets.map((P, k) => `<div class="opt ${k === this.k ? 'on' : ''}" data-k="${k}">Q＋${PS_KEYS[k]}<input data-name="${k}" maxlength="8" value="${P.name.replace(/"/g, '')}"></div>`).join('');
     $('psTools').innerHTML = '選んだ部隊の陣形：' + FORM_IDS.map((f, i) => `<button data-f="${f}">${FORMS[f].name}</button>`).join('')
-      + ' ｜ <button data-a="all">全部選ぶ</button><button data-a="front">前に向ける</button><button data-a="mirror">左右反転</button><button data-a="reset">自動配置に戻す</button>';
+      + ' ｜ 向き：<button data-a="l15">左回り15°</button><button data-a="r15">右回り15°</button><button data-a="gl">並びごと左回り</button><button data-a="gr">並びごと右回り</button><button data-a="front">前に向ける</button> ｜ <button data-a="all">全部選ぶ</button><button data-a="mirror">左右反転</button><button data-a="reset">自動配置に戻す</button>';
     this.side(); this.draw();
   },
   side() { $('psSide').innerHTML = this.items().map(it => `<div class="${this.sel.has(it.num) ? 'on' : ''}" data-n="${it.num}"><b>${it.num}</b> ${TYPES[it.type].name} ${it.n}人 ${it.esc ? '（護衛）' : FORMS[it.form].name}</div>`).join(''); },
@@ -1660,6 +1663,12 @@ const PSE = {
   s2w(u, v) { const c = $('pcv'); return [(u - c.width / 2) / this.sc + this.cx, -(v - c.height / 2) / this.sc + this.cz]; },
   corners(it) { const D = formDims(it.form, it.type, it.n, TYPES[it.type].sp), dx = -Math.sin(it.pf), dz = Math.cos(it.pf), rx = dz, rz = -dx; // 前=(dx,dz) 右=(rx,rz)
     return [[-D.w / 2, 0], [D.w / 2, 0], [D.w / 2, -D.d], [-D.w / 2, -D.d]].map(([l, f]) => [it.px + rx * l + dx * f, it.pz + rz * l + dz * f]); },
+  gen() { const P = LO.presets[this.k]; return P.gen || [0, 0]; },
+  // 選んだ部隊の向きの矢印の先（ここをドラッグすると向きが変わる）
+  tip(it) { const L = Math.max(8, formDims(it.form, it.type, it.n, TYPES[it.type].sp).w * 0.35); return [it.px - Math.sin(it.pf) * L, it.pz + Math.cos(it.pf) * L]; },
+  rot(deg, group) { const its = this.items().filter(it => this.sel.has(it.num) && !it.esc); if (!its.length) return; const a = deg * Math.PI / 180;
+    let cx = 0, cz = 0; for (const it of its) { cx += it.px; cz += it.pz; } cx /= its.length; cz /= its.length;
+    for (const it of its) { it.pf += a; if (group) { const dx = it.px - cx, dz = it.pz - cz; it.px = cx + dx * Math.cos(a) - dz * Math.sin(a); it.pz = cz + dx * Math.sin(a) + dz * Math.cos(a); } this.put(it); } this.save(); this.side(); this.draw(); },
   hit(px, pz) { const its = this.items().filter(it => !it.esc); for (const it of its.reverse()) { const C = this.corners(it); let inside = false;
       for (let i = 0, j = 3; i < 4; j = i++) { const [xi, zi] = C[i], [xj, zj] = C[j]; if ((zi > pz) !== (zj > pz) && px < (xj - xi) * (pz - zi) / (zj - zi) + xi) inside = !inside; }
       if (inside || Math.hypot(it.px - px, it.pz - pz) < 5) return it; } return null; },
@@ -1677,8 +1686,9 @@ const PSE = {
       x.beginPath(); C.forEach(([u, v], i) => i ? x.lineTo(u, v) : x.moveTo(u, v)); x.closePath(); x.fillStyle = sel ? 'rgba(240,192,48,.55)' : 'rgba(40,70,150,.55)'; x.fill(); x.strokeStyle = sel ? '#ffe080' : '#9cb4ff'; x.lineWidth = sel ? 2 : 1; x.stroke();
       const [u, v] = this.w2s(it.px, it.pz), [fu, fv] = this.w2s(it.px - Math.sin(it.pf) * 8, it.pz + Math.cos(it.pf) * 8); x.strokeStyle = '#fff'; x.lineWidth = 2; x.beginPath(); x.moveTo(u, v); x.lineTo(fu, fv); x.stroke();
       const lab = `${it.num}${TYPES[it.type].label}`; x.fillStyle = sel ? '#f0c030' : TEAM_BG[0]; x.fillRect(u - 15, v - 22, 30, 15); x.fillStyle = '#fff'; x.fillText(lab, u, v - 14); }
-    { const [u, v] = this.w2s(0, 0); x.fillStyle = '#fff'; x.beginPath(); x.moveTo(u, v - 9); x.lineTo(u - 7, v + 6); x.lineTo(u + 7, v + 6); x.closePath(); x.fill(); x.fillText('将', u, v + 16);
-      const esc = this.items().filter(it => it.esc); if (esc.length) { x.fillStyle = 'rgba(255,255,255,.7)'; x.fillText(`護衛：${esc.map(e => e.num + TYPES[e.type].label).join(' ')}`, u, v + 32); } }
+    for (const it of this.items()) if (this.sel.has(it.num) && !it.esc) { const [tu, tv] = this.w2s(...this.tip(it)); x.fillStyle = '#ffe080'; x.beginPath(); x.arc(tu, tv, 6, 0, 7); x.fill(); x.strokeStyle = '#000'; x.lineWidth = 1; x.stroke(); } // 向きのつまみ
+    { const [gx, gz] = this.gen(), [u, v] = this.w2s(gx, gz); x.fillStyle = this.drag && this.drag.gen ? '#ffe080' : '#fff'; x.strokeStyle = '#000'; x.lineWidth = 1.5; x.beginPath(); x.moveTo(u, v - 11); x.lineTo(u - 9, v + 7); x.lineTo(u + 9, v + 7); x.closePath(); x.fill(); x.stroke(); x.fillStyle = '#fff'; x.fillText('将（ドラッグで移動）', u, v + 18);
+      const esc = this.items().filter(it => it.esc); if (esc.length) { x.fillStyle = 'rgba(255,255,255,.7)'; x.fillText(`護衛：${esc.map(e => e.num + TYPES[e.type].label).join(' ')}`, u, v + 33); } }
     if (this.box) { const [a, b] = this.w2s(this.box[0], this.box[1]), [cc, d] = this.w2s(this.box[2], this.box[3]); x.strokeStyle = '#ffe080'; x.setLineDash([4, 3]); x.strokeRect(Math.min(a, cc), Math.min(b, d), Math.abs(cc - a), Math.abs(d - b)); x.setLineDash([]); }
     x.textAlign = 'left'; x.textBaseline = 'alphabetic'; x.fillStyle = 'rgba(255,255,255,.6)'; x.font = '11px sans-serif'; x.fillText(`線の間隔 10m ／ 点線の枠＝布陣できる広さの目安（2軍のとき）`, 8, Hh - 8);
   },
@@ -1687,13 +1697,18 @@ const PSE = {
     c.addEventListener('contextmenu', e => e.preventDefault());
     c.addEventListener('mousedown', e => { const [px, pz] = this.pt(e);
       if (e.button === 2) { const its = this.items().filter(it => this.sel.has(it.num) && !it.esc); for (const it of its) { const dx = px - it.px, dz = pz - it.pz; if (Math.hypot(dx, dz) > 1) { it.pf = Math.atan2(-dx, dz); this.put(it); } } this.save(); this.draw(); return; }
+      for (const it of this.items()) if (this.sel.has(it.num) && !it.esc) { const [tx, tz] = this.tip(it); if (Math.hypot(tx - px, tz - pz) < 9 / this.sc + 1) { this.drag = { rot: true, start: new Map(this.items().filter(o => this.sel.has(o.num) && !o.esc).map(o => [o.num, o.pf])), num: it.num, a0: it.pf }; return; } }
+      { const [gx, gz] = this.gen(); if (Math.hypot(gx - px, gz - pz) < 12 / this.sc + 2) { this.drag = { gen: true, px, pz, g0: [gx, gz] }; this.draw(); return; } }
       const h = this.hit(px, pz);
       if (h) { if (e.shiftKey) { this.sel.has(h.num) ? this.sel.delete(h.num) : this.sel.add(h.num); } else if (!this.sel.has(h.num)) { this.sel.clear(); this.sel.add(h.num); }
         this.drag = { px, pz, start: new Map(this.items().filter(it => this.sel.has(it.num)).map(it => [it.num, [it.px, it.pz]])) }; }
       else { if (!e.shiftKey) this.sel.clear(); this.box = [px, pz, px, pz]; }
       this.side(); this.draw(); });
     addEventListener('mousemove', e => { if (!this.drag && !this.box) return; const [px, pz] = this.pt(e);
-      if (this.drag) { const its = this.items(); for (const it of its) { const st = this.drag.start.get(it.num); if (!st) continue; it.px = clamp(st[0] + px - this.drag.px, -200, 200); it.pz = clamp(st[1] + pz - this.drag.pz, -80, 200); this.put(it); } }
+      if (this.drag && this.drag.gen) { LO.presets[this.k].gen = [+clamp(this.drag.g0[0] + px - this.drag.px, -200, 200).toFixed(1), +clamp(this.drag.g0[1] + pz - this.drag.pz, -80, 200).toFixed(1)]; }
+      else if (this.drag && this.drag.rot) { const its = this.items(), me = its.find(o => o.num === this.drag.num), d = Math.atan2(-(px - me.px), pz - me.pz) - this.drag.a0; // つまんだ部隊が向いた分だけ、選んだ部隊をみんな回す
+        for (const it of its) { const a = this.drag.start.get(it.num); if (a === undefined) continue; it.pf = a + d; this.put(it); } }
+      else if (this.drag) { const its = this.items(); for (const it of its) { const st = this.drag.start.get(it.num); if (!st) continue; it.px = clamp(st[0] + px - this.drag.px, -200, 200); it.pz = clamp(st[1] + pz - this.drag.pz, -80, 200); this.put(it); } }
       else { this.box[2] = px; this.box[3] = pz; } this.draw(); });
     addEventListener('mouseup', () => { if (this.box) { const [a, b, cc, d] = this.box; for (const it of this.items()) if (!it.esc && it.px >= Math.min(a, cc) && it.px <= Math.max(a, cc) && it.pz >= Math.min(b, d) && it.pz <= Math.max(b, d)) this.sel.add(it.num); this.box = null; this.side(); this.draw(); }
       if (this.drag) { this.drag = null; this.save(); } });
@@ -1706,8 +1721,9 @@ const PSE = {
       const a = b.dataset.a;
       if (a === 'all') { this.sel = new Set(its.filter(it => !it.esc).map(it => it.num)); }
       if (a === 'front') for (const it of its) if (this.sel.has(it.num)) { it.pf = 0; this.put(it); }
-      if (a === 'mirror') for (const it of its) if (!it.esc) { it.px = -it.px; it.pf = -it.pf; this.put(it); }
-      if (a === 'reset') { LO.presets[this.k].sq = {}; }
+      if (a === 'mirror') { for (const it of its) if (!it.esc) { it.px = -it.px; it.pf = -it.pf; this.put(it); } const g = this.gen(); LO.presets[this.k].gen = [-g[0], g[1]]; }
+      if (a === 'reset') { LO.presets[this.k].sq = {}; LO.presets[this.k].gen = [0, 0]; }
+      if (a === 'l15' || a === 'r15' || a === 'gl' || a === 'gr') { this.rot(a === 'l15' || a === 'gl' ? 15 : -15, a[0] === 'g'); return; }
       this.save(); this.side(); this.draw(); });
     addEventListener('resize', () => { if ($('pagePreset').style.display !== 'none') this.draw(); });
   },
