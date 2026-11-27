@@ -178,7 +178,7 @@ kbd{background:#33281a;border:1px solid #6a5a3a;border-radius:3px;padding:0 5px;
     <div id="psSlots"></div>
     <div id="psTools"></div>
     <div id="psWrap"><canvas id="pcv"></canvas><div id="psSide"></div></div>
-    <div id="psHelp">左クリック：部隊を選ぶ（Shiftで追加・何もない所をドラッグで範囲選択）／ ドラッグ：動かす ／ <b>向き</b>：選んだ部隊の黄色い丸をドラッグ・右クリックでその方向・上のボタン（「並びごと」は位置ごと回る）／ <b>▲の将もドラッグで動かせる</b> ／ ホイール：拡大・縮小 ／ 上が敵の方向。試合では、布陣中は本陣の将の位置から、戦闘中は<b>あなたの今いる位置を「将」の場所として、向いている方向</b>を正面に組む。布陣中は将（あなた）もその位置へ移る。護衛の部隊は将についていくので動かない</div>
+    <div id="psHelp">左クリック：部隊を選ぶ（Shiftで追加・何もない所をドラッグで範囲選択）／ ドラッグ：動かす ／ <b>向き</b>：各部隊から伸びる<b>黄色い丸</b>をドラッグ（選んだ部隊はまとめて回る）・右クリックでその方向・上のボタン（「並びごと」は位置ごと回る）／ <b>丸で囲んだ▲の将もドラッグで動かせる</b> ／ ホイール：拡大・縮小 ／ 上が敵の方向。試合では、布陣中は本陣の将の位置から、戦闘中は<b>あなたの今いる位置を「将」の場所として、向いている方向</b>を正面に組む。布陣中は将（あなた）もその位置へ移る。護衛の部隊は将についていくので動かない</div>
   </div>
   <div id="pageArmy" style="display:none">
     <div class="lbl">部隊の編成 ― 1〜0番の部隊に好きな兵種を入れる（数字キーでその部隊を選ぶ）。「護衛」にした部隊は将のそばについてくる</div>
@@ -224,7 +224,7 @@ kbd{background:#33281a;border:1px solid #6a5a3a;border-radius:3px;padding:0 5px;
 <div id="mapwrap"><div id="formBar"></div><canvas id="map"></canvas><div id="maphelp">左クリック:選択（Shiftで追加） ／ 右クリック:移動 ／ Shift+右クリック:突撃 ／ 上のボタン:陣形 ／ H:待機 R:集結 ／ Tab:閉じる</div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
-<script type="module" src="js/main.js"></script>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/","./js/main.js":"./js/main.js?v=20261127112740","./js/models.js":"./js/models.js?v=20261127112740","./js/rig.js":"./js/rig.js?v=20261127112740","./js/armor.js":"./js/armor.js?v=20261127112740","./js/sfx.js":"./js/sfx.js?v=20261127112740"}}</script>
+<script type="module" src="js/main.js?v=20261127112740"></script>
 </body>
 </html>

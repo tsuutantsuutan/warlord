@@ -1665,7 +1665,7 @@ const PSE = {
     return [[-D.w / 2, 0], [D.w / 2, 0], [D.w / 2, -D.d], [-D.w / 2, -D.d]].map(([l, f]) => [it.px + rx * l + dx * f, it.pz + rz * l + dz * f]); },
   gen() { const P = LO.presets[this.k]; return P.gen || [0, 0]; },
   // 選んだ部隊の向きの矢印の先（ここをドラッグすると向きが変わる）
-  tip(it) { const L = Math.max(8, formDims(it.form, it.type, it.n, TYPES[it.type].sp).w * 0.35); return [it.px - Math.sin(it.pf) * L, it.pz + Math.cos(it.pf) * L]; },
+  tip(it) { const L = 10 / this.sc + Math.max(6, formDims(it.form, it.type, it.n, TYPES[it.type].sp).d * 0.3); return [it.px - Math.sin(it.pf) * L, it.pz + Math.cos(it.pf) * L]; },
   rot(deg, group) { const its = this.items().filter(it => this.sel.has(it.num) && !it.esc); if (!its.length) return; const a = deg * Math.PI / 180;
     let cx = 0, cz = 0; for (const it of its) { cx += it.px; cz += it.pz; } cx /= its.length; cz /= its.length;
     for (const it of its) { it.pf += a; if (group) { const dx = it.px - cx, dz = it.pz - cz; it.px = cx + dx * Math.cos(a) - dz * Math.sin(a); it.pz = cz + dx * Math.sin(a) + dz * Math.cos(a); } this.put(it); } this.save(); this.side(); this.draw(); },
@@ -1685,10 +1685,13 @@ const PSE = {
     for (const it of this.items()) { if (it.esc) continue; const C = this.corners(it).map(([a, b]) => this.w2s(a, b)), sel = this.sel.has(it.num);
       x.beginPath(); C.forEach(([u, v], i) => i ? x.lineTo(u, v) : x.moveTo(u, v)); x.closePath(); x.fillStyle = sel ? 'rgba(240,192,48,.55)' : 'rgba(40,70,150,.55)'; x.fill(); x.strokeStyle = sel ? '#ffe080' : '#9cb4ff'; x.lineWidth = sel ? 2 : 1; x.stroke();
       const [u, v] = this.w2s(it.px, it.pz), [fu, fv] = this.w2s(it.px - Math.sin(it.pf) * 8, it.pz + Math.cos(it.pf) * 8); x.strokeStyle = '#fff'; x.lineWidth = 2; x.beginPath(); x.moveTo(u, v); x.lineTo(fu, fv); x.stroke();
-      const lab = `${it.num}${TYPES[it.type].label}`; x.fillStyle = sel ? '#f0c030' : TEAM_BG[0]; x.fillRect(u - 15, v - 22, 30, 15); x.fillStyle = '#fff'; x.fillText(lab, u, v - 14); }
-    for (const it of this.items()) if (this.sel.has(it.num) && !it.esc) { const [tu, tv] = this.w2s(...this.tip(it)); x.fillStyle = '#ffe080'; x.beginPath(); x.arc(tu, tv, 6, 0, 7); x.fill(); x.strokeStyle = '#000'; x.lineWidth = 1; x.stroke(); } // 向きのつまみ
-    { const [gx, gz] = this.gen(), [u, v] = this.w2s(gx, gz); x.fillStyle = this.drag && this.drag.gen ? '#ffe080' : '#fff'; x.strokeStyle = '#000'; x.lineWidth = 1.5; x.beginPath(); x.moveTo(u, v - 11); x.lineTo(u - 9, v + 7); x.lineTo(u + 9, v + 7); x.closePath(); x.fill(); x.stroke(); x.fillStyle = '#fff'; x.fillText('将（ドラッグで移動）', u, v + 18);
-      const esc = this.items().filter(it => it.esc); if (esc.length) { x.fillStyle = 'rgba(255,255,255,.7)'; x.fillText(`護衛：${esc.map(e => e.num + TYPES[e.type].label).join(' ')}`, u, v + 33); } }
+      const lab = `${it.num}${TYPES[it.type].label}`, [lu, lv] = C.reduce((a, b) => [a[0] + b[0] / 4, a[1] + b[1] / 4], [0, 0]); x.fillStyle = sel ? '#f0c030' : TEAM_BG[0]; x.fillRect(lu - 15, lv - 8, 30, 15); x.fillStyle = '#fff'; x.fillText(lab, lu, lv); }
+    for (const it of this.items()) if (!it.esc) { const [u, v] = this.w2s(it.px, it.pz), [tu, tv] = this.w2s(...this.tip(it)), sel = this.sel.has(it.num); // 向きのつまみ（全部隊。ドラッグで回す）
+      x.strokeStyle = sel ? '#ffe080' : 'rgba(255,224,128,.7)'; x.lineWidth = 2; x.beginPath(); x.moveTo(u, v); x.lineTo(tu, tv); x.stroke();
+      x.fillStyle = sel ? '#ffd030' : '#e8c060'; x.beginPath(); x.arc(tu, tv, sel ? 8 : 6, 0, 7); x.fill(); x.strokeStyle = '#000'; x.lineWidth = 1.5; x.stroke(); }
+    { const [gx, gz] = this.gen(), [u, v] = this.w2s(gx, gz), on = this.drag && this.drag.gen; x.fillStyle = 'rgba(0,0,0,.35)'; x.beginPath(); x.arc(u, v, 16, 0, 7); x.fill(); x.strokeStyle = on ? '#ffe080' : 'rgba(255,255,255,.8)'; x.lineWidth = 2; x.stroke();
+      x.fillStyle = on ? '#ffe080' : '#fff'; x.strokeStyle = '#000'; x.lineWidth = 1.5; x.beginPath(); x.moveTo(u, v - 11); x.lineTo(u - 9, v + 7); x.lineTo(u + 9, v + 7); x.closePath(); x.fill(); x.stroke(); x.fillStyle = '#fff'; x.fillText('将（ドラッグで移動）', u, v + 26);
+      const esc = this.items().filter(it => it.esc); if (esc.length) { x.fillStyle = 'rgba(255,255,255,.7)'; x.fillText(`護衛：${esc.map(e => e.num + TYPES[e.type].label).join(' ')}`, u, v + 41); } }
     if (this.box) { const [a, b] = this.w2s(this.box[0], this.box[1]), [cc, d] = this.w2s(this.box[2], this.box[3]); x.strokeStyle = '#ffe080'; x.setLineDash([4, 3]); x.strokeRect(Math.min(a, cc), Math.min(b, d), Math.abs(cc - a), Math.abs(d - b)); x.setLineDash([]); }
     x.textAlign = 'left'; x.textBaseline = 'alphabetic'; x.fillStyle = 'rgba(255,255,255,.6)'; x.font = '11px sans-serif'; x.fillText(`線の間隔 10m ／ 点線の枠＝布陣できる広さの目安（2軍のとき）`, 8, Hh - 8);
   },
@@ -1697,13 +1700,18 @@ const PSE = {
     c.addEventListener('contextmenu', e => e.preventDefault());
     c.addEventListener('mousedown', e => { const [px, pz] = this.pt(e);
       if (e.button === 2) { const its = this.items().filter(it => this.sel.has(it.num) && !it.esc); for (const it of its) { const dx = px - it.px, dz = pz - it.pz; if (Math.hypot(dx, dz) > 1) { it.pf = Math.atan2(-dx, dz); this.put(it); } } this.save(); this.draw(); return; }
-      for (const it of this.items()) if (this.sel.has(it.num) && !it.esc) { const [tx, tz] = this.tip(it); if (Math.hypot(tx - px, tz - pz) < 9 / this.sc + 1) { this.drag = { rot: true, start: new Map(this.items().filter(o => this.sel.has(o.num) && !o.esc).map(o => [o.num, o.pf])), num: it.num, a0: it.pf }; return; } }
-      { const [gx, gz] = this.gen(); if (Math.hypot(gx - px, gz - pz) < 12 / this.sc + 2) { this.drag = { gen: true, px, pz, g0: [gx, gz] }; this.draw(); return; } }
+      { const [gx, gz] = this.gen(); if (Math.hypot(gx - px, gz - pz) < 16 / this.sc) { this.drag = { gen: true, px, pz, g0: [gx, gz] }; this.draw(); return; } } // 将をつかむ
+      for (const it of this.items()) if (!it.esc) { const [tx, tz] = this.tip(it); if (Math.hypot(tx - px, tz - pz) < 11 / this.sc) { // 向きのつまみ
+        if (!this.sel.has(it.num)) { if (!e.shiftKey) this.sel.clear(); this.sel.add(it.num); }
+        this.drag = { rot: true, start: new Map(this.items().filter(o => this.sel.has(o.num) && !o.esc).map(o => [o.num, o.pf])), num: it.num, a0: it.pf }; this.side(); this.draw(); return; } }
       const h = this.hit(px, pz);
       if (h) { if (e.shiftKey) { this.sel.has(h.num) ? this.sel.delete(h.num) : this.sel.add(h.num); } else if (!this.sel.has(h.num)) { this.sel.clear(); this.sel.add(h.num); }
         this.drag = { px, pz, start: new Map(this.items().filter(it => this.sel.has(it.num)).map(it => [it.num, [it.px, it.pz]])) }; }
       else { if (!e.shiftKey) this.sel.clear(); this.box = [px, pz, px, pz]; }
       this.side(); this.draw(); });
+    c.addEventListener('mousemove', e => { if (this.drag || this.box) return; const [px, pz] = this.pt(e), [gx, gz] = this.gen();
+      const onKnob = this.items().some(it => !it.esc && Math.hypot(this.tip(it)[0] - px, this.tip(it)[1] - pz) < 11 / this.sc);
+      c.style.cursor = Math.hypot(gx - px, gz - pz) < 16 / this.sc ? 'move' : onKnob ? 'grab' : this.hit(px, pz) ? 'pointer' : 'crosshair'; });
     addEventListener('mousemove', e => { if (!this.drag && !this.box) return; const [px, pz] = this.pt(e);
       if (this.drag && this.drag.gen) { LO.presets[this.k].gen = [+clamp(this.drag.g0[0] + px - this.drag.px, -200, 200).toFixed(1), +clamp(this.drag.g0[1] + pz - this.drag.pz, -80, 200).toFixed(1)]; }
       else if (this.drag && this.drag.rot) { const its = this.items(), me = its.find(o => o.num === this.drag.num), d = Math.atan2(-(px - me.px), pz - me.pz) - this.drag.a0; // つまんだ部隊が向いた分だけ、選んだ部隊をみんな回す
