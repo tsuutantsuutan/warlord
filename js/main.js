@@ -140,6 +140,9 @@ let LO = { ...LO_DEF };
 try { Object.assign(LO, JSON.parse(localStorage.getItem(LO_KEY) || '{}')); } catch (e) {}
 const validComp = c => Array.isArray(c) && c.length === 10 && c.some(q => q && TYPES[q.t]);
 if (!validComp(LO.comp)) LO.comp = DEFAULT_COMP.map(q => ({ ...q }));
+// 陣形プリセット：3つ。sq[番号] = [右へのずれ m, 将より前 m, 向き(左回り+), 陣形番号]。入っていない部隊は自動配置の位置
+const PS_KEYS = ['8', '9', '0'];
+if (!Array.isArray(LO.presets) || LO.presets.length !== 3) LO.presets = [{ name: '横陣', sq: {} }, { name: '鶴翼', sq: {} }, { name: '魚鱗', sq: {} }];
 const saveLO = () => { try { localStorage.setItem(LO_KEY, JSON.stringify(LO)); } catch (e) {} };
 const teamArmor = [], heroArmor = [], heroWpn = [];
 
@@ -677,6 +680,23 @@ function orderFormation(form) {
   for (const [s, lx, lz] of place) issueOrder(s, { mode: 'move', x: clamp(cx + rx * lx + fx * lz, -WALL, WALL), z: clamp(cz + rz * lx + fz * lz, -WALL, WALL), form, face: F });
   log(`${sel.length}部隊に陣形「${FORMS[form].name}」を伝令`, '#e8c77a');
 }
+// 陣形プリセットの位置（将から見た右・前・向き）。足りない部隊は自動配置で埋める
+function presetLayout(k, list) { // list: [{num, type, n, esc}]
+  const P = LO.presets[k] || { sq: {} }, Z = { w: 125, d0: -8, d1: 72 }, auto = autoLayout(list.map(q => ({ type: q.type, n: q.n, esc: q.esc, form: q.type === 'cav' ? 'wedge' : 'line' })), Z);
+  return list.map((q, i) => { const v = P.sq[q.num]; return v ? { px: v[0], pz: v[1], pf: v[2], form: FORM_IDS[v[3]] || 'line' } : { px: auto[i][0], pz: Z.d1 - 6 - auto[i][1], pf: 0, form: q.type === 'cav' ? 'wedge' : 'line' }; });
+}
+function applyPreset(k) {
+  if (!player || !player.alive || ended) return; const P = LO.presets[k]; if (!P) return;
+  const mine = squads.filter(s => s.team === ME && s.alive.length && typeof s.num === 'number' && s.mode !== 'follow' && !s.escort && s.mode !== 'flee');
+  if (!mine.length) return;
+  const lay = presetLayout(k, mine.map(s => ({ num: s.num, type: s.type, n: s.alive.length, esc: false })));
+  let ax, az, F;
+  if (phase === 'deploy') { [ax, az] = fw(ME, 0, zoneDims(ME).d1 - 6); F = teamFrame(ME).face; }
+  else { ax = player.x; az = player.z; if (mapOpen) { let sx = 0, sz = 0; for (const s of mine) { sx += Math.sin(s.face); sz += Math.cos(s.face); } F = Math.atan2(sx, sz); } else F = yaw + Math.PI; }
+  const fx = Math.sin(F), fz = Math.cos(F), rx = -Math.cos(F), rz = Math.sin(F);
+  mine.forEach((s, i) => { const L = lay[i]; issueOrder(s, { mode: 'move', x: clamp(ax + rx * L.px + fx * L.pz, -WALL, WALL), z: clamp(az + rz * L.px + fz * L.pz, -WALL, WALL), form: L.form, face: F + L.pf }); });
+  log(`陣形プリセット「${P.name}」${phase === 'deploy' ? 'に並べた' : `を伝令（${mine.length}部隊）`}`, '#e8c77a'); showFormMenu(false);
+}
 function showFormMenu(v) { const m = $('formMenu'); if (m) m.style.display = v ? 'flex' : 'none'; }
 
 // ===== HUD =====
@@ -1189,7 +1209,7 @@ function initInput() {
     if (!running) return; keys[e.code] = true;
     if (e.code === 'Tab') { e.preventDefault(); openMap(!mapOpen); return; }
     if (e.code === 'KeyQ') { showFormMenu(true); return; }
-    const dm = e.code.match(/^Digit(\d)$/); if (dm) { if (keys.KeyQ) { const f = FORM_IDS[+dm[1] - 1]; if (f) orderFormation(f); } else selectKey(+dm[1], e.shiftKey); return; }
+    const dm = e.code.match(/^Digit(\d)$/); if (dm) { if (keys.KeyQ) { const pk = PS_KEYS.indexOf(dm[1]); if (pk >= 0) applyPreset(pk); else { const f = FORM_IDS[+dm[1] - 1]; if (f) orderFormation(f); } } else selectKey(+dm[1], e.shiftKey); return; }
     if (e.code === 'Backquote' || e.code === 'BracketLeft' || e.key === '@') { selected.clear(); for (const s of squads) if (s.team === ME && s.alive.length && s.mode !== 'follow') selected.add(s.num); hudT = 0; return; }
     if ((e.code === 'Enter' || e.code === 'NumpadEnter') && phase === 'deploy') { pressReady(); return; }
     if (e.code === 'KeyG') orderSelected('escort');
@@ -1203,9 +1223,11 @@ function initInput() {
     if (e.code === 'KeyV' && !e.repeat) { thirdPerson = !thirdPerson; hudT = 0; }
   });
   addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'KeyT' && player) player.blocking = false; if (e.code === 'KeyQ') showFormMenu(false); });
-  $('formMenu').innerHTML = FORM_IDS.map((f, i) => `<div class="fm" data-f="${f}"><b>${i + 1}</b>${FORMS[f].name}<small>${FORMS[f].d}</small></div>`).join('');
-  $('formBar').innerHTML = '陣形：' + FORM_IDS.map((f, i) => `<button data-f="${f}">${i + 1} ${FORMS[f].name}</button>`).join('') + '<button data-esc="1" title="G キー">護衛にする/外す</button><button id="readyBtn" class="rdy">開戦</button>';
+  $('formMenu').innerHTML = FORM_IDS.map((f, i) => `<div class="fm" data-f="${f}"><b>${i + 1}</b>${FORMS[f].name}<small>${FORMS[f].d}</small></div>`).join('')
+    + LO.presets.map((P, k) => `<div class="fm ps" data-ps="${k}"><b>${PS_KEYS[k]}</b>${P.name}<small>軍全体のプリセット（あなたの位置と向きが基準）</small></div>`).join('');
+  $('formBar').innerHTML = '陣形：' + FORM_IDS.map((f, i) => `<button data-f="${f}">${i + 1} ${FORMS[f].name}</button>`).join('') + '｜' + LO.presets.map((P, k) => `<button data-ps="${k}" class="psb">${PS_KEYS[k]} ${P.name}</button>`).join('') + '<button data-esc="1" title="G キー">護衛にする/外す</button><button id="readyBtn" class="rdy">開戦</button>';
   for (const el of [$('formMenu'), $('formBar')]) el.addEventListener('mousedown', e => { const b = e.target.closest('[data-f]'); if (b) { e.stopPropagation(); orderFormation(b.dataset.f); }
+    const pb = e.target.closest('[data-ps]'); if (pb) { e.stopPropagation(); applyPreset(+pb.dataset.ps); }
     if (e.target.closest('[data-esc]')) { e.stopPropagation(); orderSelected('escort'); } if (e.target.closest('#readyBtn')) { e.stopPropagation(); pressReady(); } });
   $('gl').addEventListener('click', () => { if (running && !mapOpen) { try { $('gl').requestPointerLock()?.catch?.(() => {}); } catch (e) {} } });
   addEventListener('mousemove', e => { if (document.pointerLockElement !== $('gl')) return; yaw -= e.movementX * 0.0022; pitch = clamp(pitch - e.movementY * 0.0022, -1.4, 1.4); });
@@ -1502,7 +1524,7 @@ function startGame(cfg) {
   clock.getDelta(); if (!TEST || !params.has('manual')) setTimeout(loop, 0);
   window.G = { ents, squads, msgs, arrows, step, frame, heroes, horses, NET, sendOrder, openMap, selected, orderSelected, orderFormation, issueOrder, playerAttack, tryMount, keys, FORMS, dealDamage, elim, startBattle, pressReady, deployApply, teamFrame, fw, zoneDims, aiTeams, human,
     get player() { return player }, get gameT() { return gameT }, get ME() { return ME }, get ended() { return ended }, get phase() { return phase }, get deployT() { return deployT }, ready, frameNo: () => frameNo, get NT() { return NT }, get zone() { return zone },
-    set spectate(v) { spectate = v; }, get GEN() { return GEN }, get STANCE() { return STANCE }, setStance, genFlags, camera: () => camera, get SIDE() { return SIDE }, get COOP() { return COOP }, breakSquad, moraleTick, view(o) { if (o.yaw !== undefined) yaw = o.yaw; if (o.pitch !== undefined) pitch = o.pitch; if (o.tp !== undefined) thirdPerson = o.tp; },
+    set spectate(v) { spectate = v; }, get GEN() { return GEN }, get STANCE() { return STANCE }, setStance, genFlags, camera: () => camera, applyPreset, LO, get SIDE() { return SIDE }, get COOP() { return COOP }, breakSquad, moraleTick, view(o) { if (o.yaw !== undefined) yaw = o.yaw; if (o.pitch !== undefined) pitch = o.pitch; if (o.tp !== undefined) thirdPerson = o.tp; },
     async shot(name) { frame(0.016); if (mapOpen) drawMap(); const url = (mapOpen && params.has('mapshot') ? mapC : renderer.domElement).toDataURL('image/png'); return (await fetch('/shot?name=' + name, { method: 'POST', body: url })).text(); } };
 }
 
@@ -1600,7 +1622,7 @@ function setupMenu() {
   for (const g of ['maps', 'sizes', 'teams', 'kinds', 'allies', 'foes', 'odds']) $(g).addEventListener('click', e => { const o = e.target.closest('.opt'); if (!o || o.classList.contains('dis')) return; $(g).querySelectorAll('.opt').forEach(x => x.classList.remove('on')); o.classList.add('on'); syncTeamOpts(); renderComp(); });
   $('modes').addEventListener('click', e => { const o = e.target.closest('.opt'); if (o) setMode(o.dataset.mode); });
   $('tabs').addEventListener('click', e => { const o = e.target.closest('.tab'); if (!o) return; $('tabs').querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === o));
-    $('pageBattle').style.display = o.dataset.p === 'battle' ? 'block' : 'none'; $('pageArmy').style.display = o.dataset.p === 'army' ? 'block' : 'none'; $('pageArmory').style.display = o.dataset.p === 'armory' ? 'grid' : 'none';
+    $('pageBattle').style.display = o.dataset.p === 'battle' ? 'block' : 'none'; $('pageArmy').style.display = o.dataset.p === 'army' ? 'block' : 'none'; $('pageArmory').style.display = o.dataset.p === 'armory' ? 'grid' : 'none'; $('pagePreset').style.display = o.dataset.p === 'preset' ? 'block' : 'none'; if (o.dataset.p === 'preset') PSE.open();
     if (o.dataset.p === 'armory') { initPreview(); rebuildPreview(); renderArmory(); } renderComp(); syncTeamOpts(); });
   $('pageArmy').addEventListener('change', e => { const i = e.target.dataset.i, j = e.target.dataset.e;
     if (i !== undefined) LO.comp[+i] = e.target.value ? { t: e.target.value, esc: LO.comp[+i]?.esc ? 1 : 0 } : null;
@@ -1617,6 +1639,79 @@ function setupMenu() {
   addEventListener('beforeunload', () => { try { NET.tr && NET.tr.pub('p/' + NET.myId, ''); } catch (e) {} });
   renderComp(); syncTeamOpts();
 }
+// =====================================================================
+// 陣形プリセットの編集（ロビー）：布陣の地図と同じく上から見て、部隊をドラッグで並べる
+// =====================================================================
+const PSE = {
+  k: 0, sel: new Set(), sc: 2.2, cx: 0, cz: 35, drag: null, box: null, inited: false,
+  list() { const mul = menuMul(true); return LO.comp.map((q, i) => q && TYPES[q.t] ? { num: (i + 1) % 10, type: q.t, n: Math.max(4, Math.round(TYPES[q.t].n * mul)), esc: !!q.esc } : null).filter(Boolean); },
+  items() { const L = this.list(), lay = presetLayout(this.k, L); return L.map((q, i) => ({ ...q, ...lay[i] })); },
+  save() { saveLO(); },
+  put(it) { LO.presets[this.k].sq[it.num] = [+it.px.toFixed(1), +it.pz.toFixed(1), +it.pf.toFixed(3), FORM_IDS.indexOf(it.form)]; },
+  open() {
+    const c = $('pcv'); if (!this.inited) { this.inited = true; this.bind(c); }
+    $('psSlots').innerHTML = LO.presets.map((P, k) => `<div class="opt ${k === this.k ? 'on' : ''}" data-k="${k}">Q＋${PS_KEYS[k]}<input data-name="${k}" maxlength="8" value="${P.name.replace(/"/g, '')}"></div>`).join('');
+    $('psTools').innerHTML = '選んだ部隊の陣形：' + FORM_IDS.map((f, i) => `<button data-f="${f}">${FORMS[f].name}</button>`).join('')
+      + ' ｜ <button data-a="all">全部選ぶ</button><button data-a="front">前に向ける</button><button data-a="mirror">左右反転</button><button data-a="reset">自動配置に戻す</button>';
+    this.side(); this.draw();
+  },
+  side() { $('psSide').innerHTML = this.items().map(it => `<div class="${this.sel.has(it.num) ? 'on' : ''}" data-n="${it.num}"><b>${it.num}</b> ${TYPES[it.type].name} ${it.n}人 ${it.esc ? '（護衛）' : FORMS[it.form].name}</div>`).join(''); },
+  w2s(px, pz) { const c = $('pcv'); return [c.width / 2 + (px - this.cx) * this.sc, c.height / 2 - (pz - this.cz) * this.sc]; },
+  s2w(u, v) { const c = $('pcv'); return [(u - c.width / 2) / this.sc + this.cx, -(v - c.height / 2) / this.sc + this.cz]; },
+  corners(it) { const D = formDims(it.form, it.type, it.n, TYPES[it.type].sp), dx = -Math.sin(it.pf), dz = Math.cos(it.pf), rx = dz, rz = -dx; // 前=(dx,dz) 右=(rx,rz)
+    return [[-D.w / 2, 0], [D.w / 2, 0], [D.w / 2, -D.d], [-D.w / 2, -D.d]].map(([l, f]) => [it.px + rx * l + dx * f, it.pz + rz * l + dz * f]); },
+  hit(px, pz) { const its = this.items().filter(it => !it.esc); for (const it of its.reverse()) { const C = this.corners(it); let inside = false;
+      for (let i = 0, j = 3; i < 4; j = i++) { const [xi, zi] = C[i], [xj, zj] = C[j]; if ((zi > pz) !== (zj > pz) && px < (xj - xi) * (pz - zi) / (zj - zi) + xi) inside = !inside; }
+      if (inside || Math.hypot(it.px - px, it.pz - pz) < 5) return it; } return null; },
+  draw() {
+    const c = $('pcv'), r = c.getBoundingClientRect(); if (!r.width) return; if (c.width !== Math.round(r.width) || c.height !== Math.round(r.height)) { c.width = Math.round(r.width); c.height = Math.round(r.height); }
+    const x = c.getContext('2d'), W = c.width, Hh = c.height; const g = x.createLinearGradient(0, 0, 0, Hh); g.addColorStop(0, '#5f6e45'); g.addColorStop(1, '#4a5a36'); x.fillStyle = g; x.fillRect(0, 0, W, Hh);
+    x.strokeStyle = 'rgba(255,255,255,.07)'; x.lineWidth = 1; // 10m ごとの目安線
+    const [w0, z1] = this.s2w(0, 0), [w1, z0] = this.s2w(W, Hh);
+    for (let gx = Math.ceil(w0 / 10) * 10; gx <= w1; gx += 10) { const [u] = this.w2s(gx, 0); x.beginPath(); x.moveTo(u, 0); x.lineTo(u, Hh); x.stroke(); }
+    for (let gz = Math.ceil(z0 / 10) * 10; gz <= z1; gz += 10) { const [, v] = this.w2s(0, gz); x.beginPath(); x.moveTo(0, v); x.lineTo(W, v); x.stroke(); }
+    { const [u, v] = this.w2s(0, 0); x.strokeStyle = 'rgba(255,224,128,.35)'; x.setLineDash([6, 4]); x.strokeRect(u - 125 * this.sc, v - 78 * this.sc, 250 * this.sc, 80 * this.sc); x.setLineDash([]); } // 布陣できる広さの目安
+    x.fillStyle = 'rgba(255,255,255,.55)'; x.font = 'bold 13px sans-serif'; x.textAlign = 'center'; x.fillText('▲ 敵の方向', W / 2, 18);
+    x.font = 'bold 12px sans-serif'; x.textBaseline = 'middle';
+    for (const it of this.items()) { if (it.esc) continue; const C = this.corners(it).map(([a, b]) => this.w2s(a, b)), sel = this.sel.has(it.num);
+      x.beginPath(); C.forEach(([u, v], i) => i ? x.lineTo(u, v) : x.moveTo(u, v)); x.closePath(); x.fillStyle = sel ? 'rgba(240,192,48,.55)' : 'rgba(40,70,150,.55)'; x.fill(); x.strokeStyle = sel ? '#ffe080' : '#9cb4ff'; x.lineWidth = sel ? 2 : 1; x.stroke();
+      const [u, v] = this.w2s(it.px, it.pz), [fu, fv] = this.w2s(it.px - Math.sin(it.pf) * 8, it.pz + Math.cos(it.pf) * 8); x.strokeStyle = '#fff'; x.lineWidth = 2; x.beginPath(); x.moveTo(u, v); x.lineTo(fu, fv); x.stroke();
+      const lab = `${it.num}${TYPES[it.type].label}`; x.fillStyle = sel ? '#f0c030' : TEAM_BG[0]; x.fillRect(u - 15, v - 22, 30, 15); x.fillStyle = '#fff'; x.fillText(lab, u, v - 14); }
+    { const [u, v] = this.w2s(0, 0); x.fillStyle = '#fff'; x.beginPath(); x.moveTo(u, v - 9); x.lineTo(u - 7, v + 6); x.lineTo(u + 7, v + 6); x.closePath(); x.fill(); x.fillText('将', u, v + 16);
+      const esc = this.items().filter(it => it.esc); if (esc.length) { x.fillStyle = 'rgba(255,255,255,.7)'; x.fillText(`護衛：${esc.map(e => e.num + TYPES[e.type].label).join(' ')}`, u, v + 32); } }
+    if (this.box) { const [a, b] = this.w2s(this.box[0], this.box[1]), [cc, d] = this.w2s(this.box[2], this.box[3]); x.strokeStyle = '#ffe080'; x.setLineDash([4, 3]); x.strokeRect(Math.min(a, cc), Math.min(b, d), Math.abs(cc - a), Math.abs(d - b)); x.setLineDash([]); }
+    x.textAlign = 'left'; x.textBaseline = 'alphabetic'; x.fillStyle = 'rgba(255,255,255,.6)'; x.font = '11px sans-serif'; x.fillText(`線の間隔 10m ／ 点線の枠＝布陣できる広さの目安（2軍のとき）`, 8, Hh - 8);
+  },
+  pt(e) { const c = $('pcv'), r = c.getBoundingClientRect(); return this.s2w((e.clientX - r.left) * c.width / r.width, (e.clientY - r.top) * c.height / r.height); },
+  bind(c) {
+    c.addEventListener('contextmenu', e => e.preventDefault());
+    c.addEventListener('mousedown', e => { const [px, pz] = this.pt(e);
+      if (e.button === 2) { const its = this.items().filter(it => this.sel.has(it.num) && !it.esc); for (const it of its) { const dx = px - it.px, dz = pz - it.pz; if (Math.hypot(dx, dz) > 1) { it.pf = Math.atan2(-dx, dz); this.put(it); } } this.save(); this.draw(); return; }
+      const h = this.hit(px, pz);
+      if (h) { if (e.shiftKey) { this.sel.has(h.num) ? this.sel.delete(h.num) : this.sel.add(h.num); } else if (!this.sel.has(h.num)) { this.sel.clear(); this.sel.add(h.num); }
+        this.drag = { px, pz, start: new Map(this.items().filter(it => this.sel.has(it.num)).map(it => [it.num, [it.px, it.pz]])) }; }
+      else { if (!e.shiftKey) this.sel.clear(); this.box = [px, pz, px, pz]; }
+      this.side(); this.draw(); });
+    addEventListener('mousemove', e => { if (!this.drag && !this.box) return; const [px, pz] = this.pt(e);
+      if (this.drag) { const its = this.items(); for (const it of its) { const st = this.drag.start.get(it.num); if (!st) continue; it.px = clamp(st[0] + px - this.drag.px, -200, 200); it.pz = clamp(st[1] + pz - this.drag.pz, -80, 200); this.put(it); } }
+      else { this.box[2] = px; this.box[3] = pz; } this.draw(); });
+    addEventListener('mouseup', () => { if (this.box) { const [a, b, cc, d] = this.box; for (const it of this.items()) if (!it.esc && it.px >= Math.min(a, cc) && it.px <= Math.max(a, cc) && it.pz >= Math.min(b, d) && it.pz <= Math.max(b, d)) this.sel.add(it.num); this.box = null; this.side(); this.draw(); }
+      if (this.drag) { this.drag = null; this.save(); } });
+    c.addEventListener('wheel', e => { e.preventDefault(); const [px, pz] = this.pt(e); this.sc = clamp(this.sc * (e.deltaY > 0 ? 0.88 : 1.14), 0.8, 8); const [qx, qz] = this.pt(e); this.cx += px - qx; this.cz += pz - qz; this.draw(); }, { passive: false });
+    $('psSlots').addEventListener('click', e => { if (e.target.closest('input')) return; const o = e.target.closest('[data-k]'); if (o) { this.k = +o.dataset.k; this.sel.clear(); this.open(); } });
+    $('psSlots').addEventListener('input', e => { const k = e.target.dataset.name; if (k !== undefined) { LO.presets[+k].name = e.target.value.slice(0, 8) || `陣形${PS_KEYS[+k]}`; this.save(); } });
+    $('psSide').addEventListener('click', e => { const o = e.target.closest('[data-n]'); if (!o) return; const n = +o.dataset.n; if (e.shiftKey) { this.sel.has(n) ? this.sel.delete(n) : this.sel.add(n); } else { this.sel.clear(); this.sel.add(n); } this.side(); this.draw(); });
+    $('psTools').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; const its = this.items();
+      if (b.dataset.f) for (const it of its) if (this.sel.has(it.num) && !it.esc) { it.form = b.dataset.f; this.put(it); }
+      const a = b.dataset.a;
+      if (a === 'all') { this.sel = new Set(its.filter(it => !it.esc).map(it => it.num)); }
+      if (a === 'front') for (const it of its) if (this.sel.has(it.num)) { it.pf = 0; this.put(it); }
+      if (a === 'mirror') for (const it of its) if (!it.esc) { it.px = -it.px; it.pf = -it.pf; this.put(it); }
+      if (a === 'reset') { LO.presets[this.k].sq = {}; }
+      this.save(); this.side(); this.draw(); });
+    addEventListener('resize', () => { if ($('pagePreset').style.display !== 'none') this.draw(); });
+  },
+};
 function onGo() {
   const map = document.querySelector('#maps .on').dataset.map, size = SIZE_SEL(), coop = COOP_SEL(), allies = SELV('allies', 'n', 1), odds = SELV('odds', 'x', 1);
   const nt = coop ? allies + SELV('foes', 'n', 1) : NT_SEL(), cc = coop ? { coop: 1, allies, odds } : {};
@@ -1645,4 +1740,4 @@ if (TEST && params.get('kind')) document.querySelector(`#kinds [data-k=${params.
 if (params.get('room')) { setMode('online'); $('room').value = params.get('room'); joinRoom(); }
 else if (TEST && params.get('map')) { if (params.get('lo')) Object.assign(LO, JSON.parse(params.get('lo'))); startGame({ map: params.get('map'), size: +(params.get('size') || 2), nt: +(params.get('nt') || 2), mode: 'solo', coop: params.has('coop'), allies: +params.get('coop') || 1, odds: +(params.get('odds') || 1) }); }
 else if (TEST && params.get('armory')) { $('tabs').querySelector('[data-p=armory]').click(); }
-window.WARLORD = { get PV() { return PV; }, renderArmory, rebuildPreview, pvFrame, LO };
+window.WARLORD = { PSE, get PV() { return PV; }, renderArmory, rebuildPreview, pvFrame, LO };

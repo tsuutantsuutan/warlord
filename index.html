@@ -88,6 +88,13 @@ kbd{background:#33281a;border:1px solid #6a5a3a;border-radius:3px;padding:0 5px;
 .crow b{width:20px;color:#f0d08a;font-size:18px;text-align:center}
 .crow select{font-family:inherit;font-size:14px;background:#0f0c08;color:#fff;border:1px solid #6d5634;border-radius:4px;padding:5px 8px;min-width:150px}
 .crow label{font-size:13px;color:#cdb98f;cursor:pointer}.crow .cn{color:#a8977a;font-size:12px;min-width:60px}.crow .td{color:#8a7b62;font-size:12px}
+#psSlots,#psTools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}
+#psSlots .opt input{width:110px;font-family:inherit;font-size:13px;background:#0f0c08;color:#fff;border:1px solid #6d5634;border-radius:3px;padding:2px 5px;margin-left:6px}
+#psTools button{font-family:inherit;font-size:12px;padding:4px 9px;background:#2a2014;color:#f0e2c0;border:1px solid #8a6a34;border-radius:3px;cursor:pointer}#psTools button:hover{background:#5e4318}
+#psWrap{display:grid;grid-template-columns:minmax(0,1fr) 210px;gap:10px}#pcv{width:100%;height:500px;border:1px solid #5a4528;border-radius:6px;cursor:crosshair;display:block}
+#psSide{font-size:12px;color:#cdb98f;line-height:1.7;max-height:500px;overflow:auto}#psSide div{padding:1px 6px;border-radius:3px;cursor:pointer}#psSide div.on{background:#5e4318;color:#fff}
+#psHelp{font-size:12px;color:#a8977a;margin-top:6px;line-height:1.6}
+@media (max-width:760px){#psWrap{grid-template-columns:1fr}#pcv{height:380px}}
 #compList{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;margin:6px 0}
 #compInfo{color:#e9c77a;font-size:13px;margin:6px 0}
 #typeHelp{font-size:12px;color:#a8977a;line-height:1.7}
@@ -102,7 +109,7 @@ kbd{background:#33281a;border:1px solid #6a5a3a;border-radius:3px;padding:0 5px;
 <div id="start"><div class="box">
   <h1>WARLORD</h1>
   <div class="sub">伝令の戦場 ― 将として前線に立ち、伝令で全軍を動かせ</div>
-  <div id="tabs"><div class="tab on" data-p="battle">戦場</div><div class="tab" data-p="army">編成</div><div class="tab" data-p="armory">武具（鎧・武器）</div></div>
+  <div id="tabs"><div class="tab on" data-p="battle">戦場</div><div class="tab" data-p="army">編成</div><div class="tab" data-p="preset">陣形プリセット</div><div class="tab" data-p="armory">武具（鎧・武器）</div></div>
 
   <div id="pageBattle">
     <div class="lbl">対戦</div>
@@ -166,6 +173,13 @@ kbd{background:#33281a;border:1px solid #6a5a3a;border-radius:3px;padding:0 5px;
     <button class="go" id="go">出陣</button>
   </div>
 
+  <div id="pagePreset" style="display:none">
+    <div class="lbl">陣形プリセット ― 軍全体の並び方を3つまで作っておける。試合中は <kbd>Q</kbd>＋<kbd>8</kbd>/<kbd>9</kbd>/<kbd>0</kbd>（布陣中は地図の上のボタンでも）で、その並びに組み直す</div>
+    <div id="psSlots"></div>
+    <div id="psTools"></div>
+    <div id="psWrap"><canvas id="pcv"></canvas><div id="psSide"></div></div>
+    <div id="psHelp">左クリック：部隊を選ぶ（Shiftで追加・何もない所をドラッグで範囲選択）／ ドラッグ：動かす ／ 右クリック：選んだ部隊がその方向を向く ／ ホイール：拡大・縮小 ／ ▲が将（あなた）、上が敵の方向。試合では、布陣中は本陣の将の位置から、戦闘中は<b>あなたの今いる位置と向いている方向</b>を基準に組む。護衛の部隊は将についていくので動かない</div>
+  </div>
   <div id="pageArmy" style="display:none">
     <div class="lbl">部隊の編成 ― 1〜0番の部隊に好きな兵種を入れる（数字キーでその部隊を選ぶ）。「護衛」にした部隊は将のそばについてくる</div>
     <div id="compList"></div>
